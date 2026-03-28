@@ -8,8 +8,8 @@ Legalize turns official legislation into version-controlled, machine-readable da
 
 | Country | Repo | Laws | Status |
 |---------|------|------|--------|
-| Spain | [legalize-es](https://github.com/EnriqueLop/legalize-es) | 8,600+ | Available |
-| France | legalize-fr | — | Coming soon |
+| Spain | [legalize-es](https://github.com/legalize-dev/legalize-es) | 8,600+ | Available |
+| France | [legalize-fr](https://github.com/legalize-dev/legalize-fr) | — | Coming soon |
 | United Kingdom | legalize-uk | — | Coming soon |
 | Germany | legalize-de | — | Coming soon |
 
@@ -21,7 +21,7 @@ Each law is a Markdown file with YAML frontmatter. When a reform is published, t
 
 ```bash
 # Clone Spanish legislation
-git clone https://github.com/EnriqueLop/legalize-es.git
+git clone https://github.com/legalize-dev/legalize-es.git
 
 # What does Article 135 of the Constitution say today?
 grep -A 10 "Artículo 135" spain/BOE-A-1978-31229.md
