@@ -23,6 +23,9 @@ _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 DEFAULT_INDICES_DIR = _PROJECT_DIR / "indices"
 
+# Non-law markdown files that must never end up in the index.
+_SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
+
 def _warn(msg: str) -> None:
     print(f"  [AVISO] {msg}", file=sys.stderr)
 
@@ -174,6 +177,9 @@ def main() -> None:
     for p in repo_dir.rglob("*.md"):
         # Evitar repositorios .git internos u ocultos si aplicara
         if ".git" in p.parts:
+            continue
+        # Skip documentation/meta files that live alongside the corpus.
+        if p.stem.lower() in _SKIP_STEMS:
             continue
         try:
             rel_str = p.relative_to(repo_dir).as_posix()
