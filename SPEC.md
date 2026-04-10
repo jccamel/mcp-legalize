@@ -16,7 +16,7 @@ pais: "xx"
 rango: "law_type"
 fecha_publicacion: "YYYY-MM-DD"
 ultima_actualizacion: "YYYY-MM-DD"
-estado: "vigente"
+estado: "in_force"
 fuente: "https://official-source-url"
 ---
 ```
@@ -29,7 +29,7 @@ fuente: "https://official-source-url"
 | `rango` | Type of legal text | Free-form string, country-specific |
 | `fecha_publicacion` | Original publication date | ISO 8601 date |
 | `ultima_actualizacion` | Date of the latest reform included | ISO 8601 date |
-| `estado` | Legal status | `vigente`, `derogada`, or `parcialmente_derogada` |
+| `estado` | Legal status | `in_force`, `repealed`, `partially_repealed`, `annulled`, or `expired` |
 | `fuente` | URL to the official source | Valid URL |
 
 Additional fields are welcome. Korea adds law sub-types, Spain adds `jurisdiccion` for autonomous communities, France may add code structure metadata. These are country-specific extensions.
