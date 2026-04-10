@@ -44,12 +44,13 @@ except ImportError:
 _SCRIPT_DIR = Path(__file__).parent
 
 if load_dotenv is not None:
-    load_dotenv(_SCRIPT_DIR / ".env", override=False)
+    # Local .env (cwd) takes precedence over the one next to the script.
     load_dotenv(".env", override=False)
+    load_dotenv(_SCRIPT_DIR / ".env", override=False)
 
 INDICES_DIR = Path(os.environ.get("LEGALIZE_INDICES_DIR", "") or _SCRIPT_DIR / "indices")
 DEFAULT_LIMIT = int(os.environ.get("LEGALIZE_DEFAULT_LIMIT", "20"))
-MAX_LIMIT = 100
+MAX_LIMIT = int(os.environ.get("LEGALIZE_MAX_LIMIT", "100"))
 MAX_CONTENT_CHARS = int(os.environ.get("LEGALIZE_MAX_CONTENT_CHARS", "80000"))
 
 
@@ -135,14 +136,24 @@ class ErrorRespuesta(BaseModel):
 
 _DOCS_POR_PAIS: dict[str, dict[str, DocumentoMeta]] = {}
 _META_POR_PAIS: dict[str, dict] = {}
+_INDEX_FILE_POR_PAIS: dict[str, str] = {}
 _PAIS_NOMBRE = {
-    "es": "España",
-    "se": "Suecia",
-    "fr": "Francia",
-    "lv": "Letonia",
+    "es": "Spain",
+    "se": "Sweden",
+    "fr": "France",
+    "lv": "Latvia",
     "at": "Austria",
-    "de": "Alemania",
-    "kr": "Corea del Sur"
+    "de": "Germany",
+    "kr": "South Korea",
+    "it": "Italy",
+    "pt": "Portugal",
+    "nl": "Netherlands",
+    "be": "Belgium",
+    "fi": "Finland",
+    "dk": "Denmark",
+    "no": "Norway",
+    "pl": "Poland",
+    "mock": "Mock (testing)",
 }
 
 def _load_indices():
@@ -166,6 +177,7 @@ def _load_indices():
                     for doc_id, doc in data["documentos"].items()
                 }
                 _META_POR_PAIS[pais_code] = meta
+                _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
                 
                 print(
                     f"[Legalize MCP] [{pais_code.upper()}] {len(_DOCS_POR_PAIS[pais_code]):,} docs "
@@ -183,11 +195,11 @@ print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_DOCS_POR_PAIS)
 # ─────────────────────────── Helpers ─────────────────────────────────────────
 
 _ARTICULO_PATTERNS_TEMPLATE = [
-    r"(?i)art[ií]culo\s+{term}\b",
-    r"(?i)\bArt\.\s*{term}\b",
-    r"(?i)\bArticle\s+{term}\b",
-    r"(?i)^{term}\s*§",
-    r"(?i)^{term}\s*$",
+    r"(?im)art[ií]culo\s+{term}\b",
+    r"(?im)\bArt\.\s*{term}\b",
+    r"(?im)\bArticle\s+{term}\b",
+    r"(?im)^{term}\s*§",
+    r"(?im)^{term}\s*$",
 ]
 _NEXT_SECTION_RE = re.compile(
     r"(?i)art[ií]culo\s+\d+|^\d+\s*§|Article\s+[LRD]?\d+|^TÍTULO\s+|^CAPÍTULO\s+|^Kapitel\s+|^LIVRE\s+",
@@ -220,11 +232,12 @@ def _read_file(doc: DocumentoMeta, pais_code: str) -> str:
     except OSError:
         return ""
 
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|\r\n|\Z)", re.DOTALL)
+
 def _strip_frontmatter(content: str) -> str:
-    if content.startswith("---"):
-        end = content.find("\n---", 3)
-        if end != -1:
-            return content[end + 4:].lstrip()
+    m = _FRONTMATTER_RE.match(content)
+    if m:
+        return content[m.end():].lstrip()
     return content
 
 def _normalize(text: str) -> str:
@@ -247,6 +260,29 @@ def _iter_docs(pais: str = ""):
         for pais_code, docs in _DOCS_POR_PAIS.items():
             for doc_id, doc in docs.items():
                 yield pais_code, doc_id, doc
+
+def _resolve_ley(id_ley: str, pais: str = ""):
+    """Resuelve un id (exacto o parcial) a (pais_code, doc_id, DocumentoMeta).
+
+    Devuelve (None, None, None, error_msg|None) en caso de no encontrarse o
+    ambigüedad. Si se especifica `pais`, solo busca en esa jurisdicción.
+    """
+    id_norm = id_ley.strip().upper().replace(".MD", "")
+    paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
+
+    for pais_code in paises_a_buscar:
+        docs = _DOCS_POR_PAIS[pais_code]
+        if id_norm in docs:
+            return pais_code, id_norm, docs[id_norm], None
+
+        matches = [(k, v) for k, v in docs.items() if id_norm in k]
+        if len(matches) == 1:
+            k, v = matches[0]
+            return pais_code, k, v, None
+        if len(matches) > 1 and len(paises_a_buscar) == 1:
+            return None, None, None, f"ID ambiguo. Coincidencias: {[m[0] for m in matches[:10]]}"
+
+    return None, None, None, f"Ley no encontrada: {id_ley}"
 
 
 # ─────────────────────────── Servidor MCP ────────────────────────────────────
@@ -279,7 +315,7 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
             nombre=_PAIS_NOMBRE.get(pais_code, pais_code.upper()),
             total_documentos=len(docs),
             total_megabytes=round(total_bytes / 1_048_576, 1),
-            indice=f"index_{pais_code}",
+            indice=_INDEX_FILE_POR_PAIS.get(pais_code, f"index_{pais_code}"),
         ))
     return resultado
 
@@ -327,27 +363,9 @@ def buscar_ley(
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
     if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
 
-    id_norm = id_ley.strip().upper().replace(".MD", "")
-    paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
-
-    found_pais, found_doc, found_id = None, None, None
-
-    for pais_code in paises_a_buscar:
-        docs = _DOCS_POR_PAIS[pais_code]
-        if id_norm in docs:
-            found_pais, found_doc, found_id = pais_code, docs[id_norm], id_norm
-            break
-        
-        matches = [(k, v) for k, v in docs.items() if id_norm in k]
-        if len(matches) == 1:
-            found_id, found_doc = matches[0]
-            found_pais = pais_code
-            break
-        elif len(matches) > 1 and len(paises_a_buscar) == 1:
-            return ErrorRespuesta(error=f"ID ambiguo. Coincidencias: {[m[0] for m in matches[:10]]}")
-
-    if not found_doc:
-        return ErrorRespuesta(error=f"Ley no encontrada: {id_ley}")
+    found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
+    if err:
+        return ErrorRespuesta(error=err)
 
     resumen = _doc_resumen(found_id, found_doc, found_pais)
     resultado = LeyCompleta(**resumen.model_dump())
@@ -370,24 +388,16 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if not _DOCS_POR_PAIS:
         return ArticuloResultado(id="", pais="", titulo="", articulo_buscado=articulo, error="No hay índices disponibles.")
 
-    id_norm = id_ley.strip().upper().replace(".MD", "")
-    paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
-
-    found_pais, found_doc, found_id = None, None, None
-    for pais_code in paises_a_buscar:
-        if id_norm in _DOCS_POR_PAIS[pais_code]:
-            found_pais, found_doc, found_id = pais_code, _DOCS_POR_PAIS[pais_code][id_norm], id_norm
-            break
-
-    if not found_doc:
-        return ArticuloResultado(id=id_norm, pais=pais, titulo="", articulo_buscado=articulo, error=f"Ley no encontrada")
+    found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
+    if err:
+        return ArticuloResultado(id=id_ley.strip().upper().replace(".MD", ""), pais=pais, titulo="", articulo_buscado=articulo, error=err)
 
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
     term = re.escape(articulo_clean)
 
     for pattern_tpl in _ARTICULO_PATTERNS_TEMPLATE:
-        m = re.search(pattern_tpl.format(term=term), content, re.MULTILINE)
+        m = re.search(pattern_tpl.format(term=term), content)
         if m:
             start = m.start()
             next_art = _NEXT_SECTION_RE.search(content, m.end())
