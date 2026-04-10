@@ -4,5 +4,7 @@ __pycache__/
 *.pyc
 
 # Local repos and indices
-repos/
-indices/
+repos/*
+!repos/.gitkeep
+indices/*
+!indices/.gitkeep
