@@ -6,5 +6,7 @@ __pycache__/
 # Local repos and indices
 repos/*
 !repos/.gitkeep
+!repos/legalize-mock/
 indices/*
 !indices/.gitkeep
+!indices/index_legalize-mock.json

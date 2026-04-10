@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "generado_en": "2026-04-10T21:52:43",
+    "total_documentos": 1,
+    "directorio_base": "repos/legalize-mock",
+    "pais_predeterminado": "mock",
+    "version": "2.0.0"
+  },
+  "documentos": {
+    "MOCK-1": {
+      "titulo": "Mock Law for Testing",
+      "identificador": "MOCK-1",
+      "pais": "mk",
+      "rango": "mock_law",
+      "fecha_publicacion": "2024-01-01",
+      "ultima_actualizacion": "2024-01-01",
+      "estado": "vigente",
+      "fuente": "https://example.com",
+      "_archivo": "mock_law.md",
+      "_ruta": "mock/mock_law.md",
+      "_bytes": 327,
+      "_mtime": 1775857949.991746
+    }
+  }
+}
