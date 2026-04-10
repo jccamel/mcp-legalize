@@ -47,6 +47,43 @@ git log --oneline -- spain/BOE-A-1978-31229.md
 # Show the exact diff of the 2011 fiscal stability reform
 git diff 6660bcf^..6660bcf -- spain/BOE-A-1978-31229.md
 ```
+## MCP Server
+
+This repository also acts as the **Model Context Protocol (MCP) Server** for the Legalize ecosystem. By running this server, you can allow any AI Assistant (Claude Desktop, Cursor) to search and read the laws of *all* cloned country repositories dynamically!
+
+### 1. Setup
+
+```bash
+git clone https://github.com/legalize-dev/legalize mcp-legalize
+cd mcp-legalize
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Add Country Repositories
+
+Clone the countries you want to access inside the `repos/` subdirectory:
+
+```bash
+mkdir repos
+git clone https://github.com/legalize-dev/legalize-es repos/legalize-es
+git clone https://github.com/legalize-dev/legalize-se repos/legalize-se
+```
+
+### 3. Generate Indices
+
+Run the indexing script for the cloned countries:
+
+```bash
+python scripts/update_index.py --repo repos/legalize-es
+```
+
+### 4. Connect your AI
+
+Add this server to your AI's MCP config:
+- **Command:** `python`
+- **Args:** `["/absolute/path/to/mcp-legalize/mcp_legalize.py"]`
 
 ## Repos
 
@@ -94,4 +131,6 @@ Repository structure, metadata, and tooling: [MIT](LICENSE).
 
 ---
 
-Created by [Enrique Lopez](https://enriquelopez.eu) · [legalize.dev](https://legalize.dev)
+Original Legalize project created by [Enrique Lopez](https://enriquelopez.eu) · [legalize.dev](https://legalize.dev)
+
+MCP Server capabilities & integration [jccamel](https://github.com/jccamel).
