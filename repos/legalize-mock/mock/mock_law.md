@@ -1,11 +1,11 @@
 ---
 titulo: "Mock Law for Testing"
 identificador: "MOCK-1"
-pais: "mk"
+pais: "mock"
 rango: "mock_law"
 fecha_publicacion: "2024-01-01"
 ultima_actualizacion: "2024-01-01"
-estado: "vigente"
+estado: "in_force"
 fuente: "https://example.com"
 ---
 
