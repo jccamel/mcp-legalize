@@ -68,7 +68,6 @@ Clone the countries you want to access inside the `repos/` subdirectory:
 ```bash
 mkdir repos
 git clone https://github.com/legalize-dev/legalize-es repos/legalize-es
-git clone https://github.com/legalize-dev/legalize-se repos/legalize-se
 ```
 
 ### 3. Generate Indices
