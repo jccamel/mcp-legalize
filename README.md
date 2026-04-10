@@ -122,7 +122,7 @@ Found an error in a law text? Open an issue in the relevant country repo with th
 Legalize is open source and free. If you want to help fund hosting and development:
 
 - [Open Collective](https://opencollective.com/legalize)
-- [Buy me a coffee](https://buymeacoffee.com/elopcast)
+- [Buy coffee to Enrique](https://buymeacoffee.com/elopcast)
 
 ## License
 
