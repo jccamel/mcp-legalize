@@ -33,13 +33,13 @@ sequenceDiagram
     U->>AI: "What does article 135 of the Spanish Constitution say?"
     
     note over AI,MCP: MCP Protocol
-    AI->>MCP: Call tool: buscar_ley(consulta="Constitución", pais="es")
+    AI->>MCP: Call tool: buscar_ley(consulta="Constitución Española", pais="es", rango="constitucion")
     
     MCP->>I: In-memory search
-    I-->>MCP: Returns Document ID & Metadata
-    MCP-->>AI: ID: BOE-A-1978-31229
+    I-->>MCP: Returns matching documents
+    MCP-->>AI: [BOE-A-1978-31229, ...]
     
-    AI->>MCP: Call tool: obtener_articulo(id="BOE-A-1978-31229", articulo="135")
+    AI->>MCP: Call tool: obtener_articulo(id_ley="BOE-A-1978-31229", articulo="135")
     MCP->>R: Read specific .md file on disk
     R-->>MCP: Raw Markdown Content
     MCP-->>AI: Extract and return only Article 135 text
