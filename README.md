@@ -18,6 +18,37 @@ By running this server and cloning the country repositories you need, your AI wi
 
 ---
 
+## 🔄 How it Works (Workflow)
+
+The diagram below shows how the different parts of the ecosystem communicate. The Model Context Protocol ensures your AI has real-time, read-only access to standard offline repos.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant AI as AI Assistant (Claude/Cursor)
+    participant MCP as mcp_legalize.py
+    participant I as JSON Indices (Memory)
+    participant R as Git Repositories (Disk)
+
+    U->>AI: "What does article 135 of the Spanish Constitution say?"
+    
+    note over AI,MCP: MCP Protocol
+    AI->>MCP: Call tool: buscar_ley(consulta="Constitución", pais="es")
+    
+    MCP->>I: In-memory search
+    I-->>MCP: Returns Document ID & Metadata
+    MCP-->>AI: ID: BOE-A-1978-31229
+    
+    AI->>MCP: Call tool: obtener_articulo(id="BOE-A-1978-31229", articulo="135")
+    MCP->>R: Read specific .md file on disk
+    R-->>MCP: Raw Markdown Content
+    MCP-->>AI: Extract and return only Article 135 text
+    
+    AI-->>U: Synthesized, accurate answer based on the official text.
+```
+
+---
+
 ## 🚀 Setup & Installation
 
 ### 1. Clone the Server
