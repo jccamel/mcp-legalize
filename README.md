@@ -1,135 +1,119 @@
-# Legalize
+# Legalize MCP Server
 
-**Legislation as code.** Every law as a Markdown file. Every reform as a Git commit.
+**The Model Context Protocol (MCP) Server for the Legalize Ecosystem.**
 
-Legalize turns official legislation into version-controlled, machine-readable data. Browse, search, diff, and build on structured legal data from multiple countries.
+This repository is a specialized fork of the `legalize` project, designed to act as an MCP Server. It bridges advanced AI Assistants (like Claude Desktop, Cursor, or any MCP-compatible agent) with the consolidated laws of multiple countries in real-time.
 
-**[legalize.dev](https://legalize.dev)** — Browse laws, see diffs, search across legislation.
+By running this server and cloning the country repositories you need, your AI will be able to search laws, extract specific articles, and understand the legal framework of different jurisdictions dynamically.
 
-## Countries
+---
 
-| Country | Repo | Laws | Source | Status |
-|---------|------|------|--------|--------|
-| 🇦🇹 Austria | [legalize-at](https://github.com/legalize-dev/legalize-at) | 21,830 | [RIS](https://www.ris.bka.gv.at/) | ✅ Live |
-| 🇱🇻 Latvia | [legalize-lv](https://github.com/legalize-dev/legalize-lv) | 15,006 | [likumi.lv](https://likumi.lv/) | ✅ Live |
-| 🇪🇸 Spain | [legalize-es](https://github.com/legalize-dev/legalize-es) | 12,235 | [BOE](https://www.boe.es/) | ✅ Live |
-| 🇸🇪 Sweden | [legalize-se](https://github.com/legalize-dev/legalize-se) | 9,701 | [Riksdagen](https://data.riksdagen.se/) | ✅ Live |
-| 🇩🇪 Germany | [legalize-de](https://github.com/legalize-dev/legalize-de) | 5,729 | [GII](https://www.gesetze-im-internet.de/) | ✅ Live |
-| 🇰🇷 South Korea | [legalize-kr](https://github.com/9bow/legalize-kr) | 5,575 | [law.go.kr](https://open.law.go.kr) | ✅ Community |
-| 🇫🇷 France | [legalize-fr](https://github.com/legalize-dev/legalize-fr) | 83 codes | [Légifrance](https://www.legifrance.gouv.fr/) | ✅ Live |
-| 🇵🇹 Portugal | — | — | [DRE](https://dre.pt/) | 🚧 Pipeline ready |
-| 🇱🇹 Lithuania | — | — | [TAR](https://www.e-tar.lt/) | 🚧 Pipeline ready |
-| 🇨🇱 Chile | — | — | [BCN](https://www.bcn.cl/) | 🚧 Pipeline ready |
-| 🇺🇾 Uruguay | — | — | [IMPO](https://www.impo.com.uy/) | 🚧 Pipeline ready |
-| 🇫🇮 Finland | — | — | [Finlex](https://www.finlex.fi/) | 🔜 Help wanted |
-| 🇳🇱 Netherlands | — | — | [Overheid.nl](https://www.overheid.nl/) | 🔜 Help wanted |
-| 🇧🇷 Brazil | — | — | [LeXML](https://www.lexml.gov.br/) | 🔜 Help wanted |
-| 🇺🇸 USA | — | — | — | 🔜 Help wanted |
+## ✨ Features
 
-**Want to add your country?** See the [step-by-step guide](https://github.com/legalize-dev/legalize-pipeline/blob/main/docs/ADDING_A_COUNTRY.md).
+- 🌍 **Multi-Jurisdiction Support**: Natively supports any country repository following the [Legalize format spec](SPEC.md).
+- 🔍 **Intelligent Search**: Search across countries by title, keywords, year, or legal rank.
+- ⚡ **Dynamic Indexing**: Recursively scans your cloned git repositories and generates ultra-fast JSON indices.
+- 📖 **Smart Extraction**: Specifically built tools to extract exact articles or sections instead of overwhelming the Context Window.
+- 🧪 **Out-of-the-box Testing**: Includes a mock legal repository so you can test the AI integration immediately without downloading gigabytes of data.
 
-## How it works
+---
 
-Each law is a Markdown file with YAML frontmatter. When a reform is published, the file is updated and committed with the official publication date.
+## 🚀 Setup & Installation
 
-Standard Git tools become legal research tools:
+### 1. Clone the Server
 
 ```bash
-# Clone Spanish legislation
-git clone https://github.com/legalize-dev/legalize-es.git
-
-# What does Article 135 of the Constitution say today?
-grep -A 10 "Artículo 135" spain/BOE-A-1978-31229.md
-
-# When did it change?
-git log --oneline -- spain/BOE-A-1978-31229.md
-
-# Show the exact diff of the 2011 fiscal stability reform
-git diff 6660bcf^..6660bcf -- spain/BOE-A-1978-31229.md
-```
-## MCP Server
-
-This repository also acts as the **Model Context Protocol (MCP) Server** for the Legalize ecosystem. By running this server, you can allow any AI Assistant (Claude Desktop, Cursor) to search and read the laws of *all* cloned country repositories dynamically!
-
-### 1. Setup
-
-```bash
-git clone https://github.com/legalize-dev/legalize mcp-legalize
+git clone https://github.com/your-username/mcp-legalize.git
 cd mcp-legalize
-python -m venv .venv
+```
+
+### 2. Prepare the Python Environment
+
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Add Country Repositories
-
-Clone the countries you want to access inside the `repos/` subdirectory:
-
+*(Optional)* You can copy `.env.example` to `.env` to configure advanced paths or limits:
 ```bash
-mkdir repos
-git clone https://github.com/legalize-dev/legalize-es repos/legalize-es
+cp .env.example .env
 ```
 
-### 3. Generate Indices
+---
 
-Run the indexing script for the cloned countries:
+## 🏛️ Adding Legislation
+
+This MCP server is completely structural: it doesn't contain the actual laws by default (except for testing mocks). You must clone the specific `legalize` countries you want your AI to know about into the `repos/` directory.
+
+```bash
+# Example: Adding Spain and Sweden
+git clone https://github.com/legalize-dev/legalize-es repos/legalize-es
+git clone https://github.com/legalize-dev/legalize-se repos/legalize-se
+```
+
+*Note: The `repos/` folder is ignored by `.gitignore`, so cloning massive datasets inside it will not pollute this repository's git history.*
+
+### Generate the Indices
+
+Once the repositories are downloaded, you need to generate their indices so the MCP Server can search through them efficiently:
 
 ```bash
 python scripts/update_index.py --repo repos/legalize-es
+python scripts/update_index.py --repo repos/legalize-se
 ```
 
-### 4. Connect your AI
+You must re-run these commands whenever you `git pull` new updates inside the country repositories.
 
-Add this server to your AI's MCP config:
-- **Command:** `python`
-- **Args:** `["/absolute/path/to/mcp-legalize/mcp_legalize.py"]`
+---
 
-## Repos
+## 🔌 Connecting your AI
 
-| Repo | What |
-|------|------|
-| **[legalize](https://github.com/legalize-dev/legalize)** | This repo. Index, docs, overview. |
-| **[legalize-pipeline](https://github.com/legalize-dev/legalize-pipeline)** | The engine. Fetches, parses, and commits legislation for 10 countries. |
-| **[legalize-at](https://github.com/legalize-dev/legalize-at)** | Austrian laws (21,830 norms). |
-| **[legalize-lv](https://github.com/legalize-dev/legalize-lv)** | Latvian laws (15,006 consolidated norms). |
-| **[legalize-es](https://github.com/legalize-dev/legalize-es)** | Spanish laws (12,235 norms + 17 autonomous communities). |
-| **[legalize-se](https://github.com/legalize-dev/legalize-se)** | Swedish statutes (9,701 laws). |
-| **[legalize-de](https://github.com/legalize-dev/legalize-de)** | German laws (5,729 laws). |
-| **[legalize-fr](https://github.com/legalize-dev/legalize-fr)** | French codes (83 codes). |
-| **[legalize-kr](https://github.com/9bow/legalize-kr)** | South Korean laws (5,575 laws). Community contribution by [@9bow](https://github.com/9bow). |
+To use this server, add it to your AI client's MCP configuration settings. Make sure to use **absolute paths**.
 
-## Why
+### Claude Desktop
+Edit `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "legalize": {
+      "command": "/ABSOLUTE/PATH/TO/mcp-legalize/.venv/bin/python",
+      "args": [
+        "/ABSOLUTE/PATH/TO/mcp-legalize/mcp_legalize.py"
+      ]
+    }
+  }
+}
+```
 
-Legal texts are amended constantly, but tracking changes is hard. Official sources publish consolidated versions with no way to compare. Commercial providers charge hundreds per month for version history.
+### Cursor IDE
+1. Go to **Settings** -> **Features** -> **MCP**.
+2. Click **+ Add New MCP Server**.
+3. **Name**: `Legalize`
+4. **Type**: `command`
+5. **Command**: `/ABSOLUTE/PATH/TO/mcp-legalize/.venv/bin/python /ABSOLUTE/PATH/TO/mcp-legalize/mcp_legalize.py`
 
-Legalize is open legal infrastructure:
+---
 
-- **For developers** — structured, versioned legal data with a REST API
-- **For researchers and journalists** — explore the evolution of legislation with git
-- **For citizens** — see how the laws that affect you have changed
+## 🛠️ MCP Tools Overview
 
-## Contributing
+Once connected, your AI will have access to the following tools:
 
-The main contribution is adding a new country. Read the [format spec](SPEC.md) for the minimal contract, then follow the [step-by-step guide](https://github.com/legalize-dev/legalize-pipeline/blob/main/ADDING_A_COUNTRY.md).
+- `listar_paises` — Lists all currently indexed jurisdictions.
+- `buscar_ley` — Searches for laws using advanced filters (title, country, year, rank).
+- `obtener_ley` — Returns the full text and metadata of a specific law by its ID.
+- `obtener_articulo` — Extracts a precise slice of text corresponding to a specific article (e.g., "Artículo 155", "5 §").
+- `listar_rangos` — Lists available norm types and their frequency in the corpus.
+- `estadisticas` — Returns global metrics of the datasets.
 
-You can use the shared [legalize-pipeline](https://github.com/legalize-dev/legalize-pipeline) or build your own pipeline — as long as the output follows the spec. South Korea was built with an independent pipeline and it works great.
+---
 
-Found an error in a law text? Open an issue in the relevant country repo with the law name, article, and the official source showing the correct version.
-
-## Support
-
-Legalize is open source and free. If you want to help fund hosting and development:
-
-- [Open Collective](https://opencollective.com/legalize)
-- [Buy coffee to Enrique](https://buymeacoffee.com/elopcast)
-
-## License
+## 📜 Credits & License
 
 Legislative content: public domain (sourced from official government publications).
 Repository structure, metadata, and tooling: [MIT](LICENSE).
 
----
+Original Legalize project created by [Enrique Lopez](https://enriquelopez.eu) · [legalize.dev](https://legalize.dev). 
+You can support the original infrastructure by buying a coffee [here](https://buymeacoffee.com/elopcast).
 
-Original Legalize project created by [Enrique Lopez](https://enriquelopez.eu) · [legalize.dev](https://legalize.dev)
-
-MCP Server capabilities & integration [jccamel](https://github.com/jccamel).
+MCP Server capabilities & integration architecture by [jccamel](https://github.com/jccamel).
