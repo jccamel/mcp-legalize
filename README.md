@@ -10,9 +10,9 @@ By running this server and cloning the country repositories you need, your AI wi
 
 ## ✨ Features
 
-- 🌍 **Multi-Jurisdiction Support**: Natively supports any country repository following the [Legalize format spec](SPEC.md).
-- 🔍 **Intelligent Search**: Search across countries by title, keywords, year, or legal rank.
-- ⚡ **Dynamic Indexing**: Recursively scans your cloned git repositories and generates ultra-fast JSON indices.
+- 🌍 **Multi-Jurisdiction Support**: Natively supports any country repository following the [Legalize Format Spec](https://github.com/legalize-dev/legalize-es/blob/main/SPEC.md).
+- 🔍 **Advanced Search**: Filter by title, country, sub-jurisdiction, legal rank, status, and date range.
+- ⚡ **Dynamic Indexing**: Recursively scans your cloned git repositories and generates fast JSON indices.
 - 📖 **Smart Extraction**: Specifically built tools to extract exact articles or sections instead of overwhelming the Context Window.
 - 🧪 **Out-of-the-box Testing**: Includes a mock legal repository so you can test the AI integration immediately without downloading gigabytes of data.
 
@@ -89,14 +89,29 @@ git clone https://github.com/legalize-dev/legalize-se repos/legalize-se
 
 ### Generate the Indices
 
-Once the repositories are downloaded, you need to generate their indices so the MCP Server can search through them efficiently:
+Once the repositories are downloaded, generate their indices so the MCP Server can search through them efficiently:
 
 ```bash
 python scripts/update_index.py --repo repos/legalize-es
 python scripts/update_index.py --repo repos/legalize-se
 ```
 
-You must re-run these commands whenever you `git pull` new updates inside the country repositories.
+---
+
+## 🔁 Keeping Indices Up to Date
+
+When upstream country repositories receive updates, you need to re-index them. Use `check_updates.py` to see which repos have new commits that haven't been indexed yet:
+
+```bash
+# Check which repos are out of date
+python scripts/check_updates.py
+
+# Pull and re-index any outdated repo
+git -C repos/legalize-es pull
+python scripts/update_index.py --repo repos/legalize-es
+```
+
+`check_updates.py` exits with code 1 if any index is stale, making it suitable for use in CI pipelines.
 
 ---
 
@@ -132,12 +147,12 @@ Edit `claude_desktop_config.json`:
 
 Once connected, your AI will have access to the following tools:
 
-- `listar_paises` — Lists all currently indexed jurisdictions.
-- `buscar_ley` — Searches for laws using advanced filters (title, country, year, rank).
+- `listar_paises` — Lists all currently indexed jurisdictions with document counts and size.
+- `buscar_ley` — Searches for laws using filters: title text, country, sub-jurisdiction (e.g. `es-an`), legal rank, status, year, and publication date range.
 - `obtener_ley` — Returns the full text and metadata of a specific law by its ID.
-- `obtener_articulo` — Extracts a precise slice of text corresponding to a specific article (e.g., "Artículo 155", "5 §").
+- `obtener_articulo` — Extracts a precise slice of text for a specific article. Supports Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`).
 - `listar_rangos` — Lists available norm types and their frequency in the corpus.
-- `estadisticas` — Returns global metrics of the datasets.
+- `estadisticas` — Returns global metrics of the loaded datasets.
 
 ---
 
