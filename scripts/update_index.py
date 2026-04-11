@@ -13,6 +13,7 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -25,6 +26,17 @@ DEFAULT_INDICES_DIR = _PROJECT_DIR / "indices"
 
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
+
+def _git_head_commit(repo_dir: Path) -> str:
+    """Devuelve el hash del commit HEAD del repo git, o '' si no es un repo git."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
 
 def _warn(msg: str) -> None:
     print(f"  [AVISO] {msg}", file=sys.stderr)
@@ -107,6 +119,17 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         "_bytes":               stat.size,
         "_mtime":               stat.mtime,
     }
+
+    # Campos opcionales: solo se incluyen si están presentes en el frontmatter.
+    for field, keys in [
+        ("jurisdiccion", ("jurisdiccion", "jurisdiction")),
+        ("departamento",  ("departamento", "department")),
+        ("fecha_derogacion", ("fecha_derogacion", "repeal_date")),
+        ("derogado_por",  ("derogado_por", "repealed_by")),
+    ]:
+        val = _get(*keys)
+        if val:
+            entry[field] = val
     return doc_id, entry
 
 def _write_atomic(path: Path, data: dict) -> None:
@@ -244,6 +267,10 @@ def main() -> None:
     meta_idx["directorio_base"] = base_dir_str
     meta_idx["pais_predeterminado"] = fallback_pais
     meta_idx.setdefault("version", "2.0.0")
+
+    commit = _git_head_commit(repo_dir)
+    if commit:
+        meta_idx["git_commit"] = commit
 
     print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
     try:

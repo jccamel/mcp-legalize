@@ -1,10 +1,11 @@
 {
   "_meta": {
-    "generado_en": "2026-04-11T00:00:00",
+    "generado_en": "2026-04-11T17:33:40",
     "total_documentos": 1,
     "directorio_base": "repos/legalize-mock",
     "pais_predeterminado": "mock",
-    "version": "2.0.0"
+    "version": "2.0.0",
+    "git_commit": "eb320e2f6e203a1f9f4dd2433387e2aea9cbf913"
   },
   "documentos": {
     "MOCK-1": {
@@ -19,7 +20,7 @@
       "_archivo": "mock_law.md",
       "_ruta": "mock/mock_law.md",
       "_bytes": 330,
-      "_mtime": 1775857949.991746
+      "_mtime": 1775861517.8850322
     }
   }
 }
