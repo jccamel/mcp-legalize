@@ -24,11 +24,6 @@ from typing import Optional
 from pydantic import BaseModel
 
 try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-try:
     from fastmcp import FastMCP
 except ImportError:
     print(
@@ -42,11 +37,6 @@ except ImportError:
 # ─────────────────────────── Configuración ───────────────────────────────────
 
 _SCRIPT_DIR = Path(__file__).parent
-
-if load_dotenv is not None:
-    # Local .env (cwd) takes precedence over the one next to the script.
-    load_dotenv(".env", override=False)
-    load_dotenv(_SCRIPT_DIR / ".env", override=False)
 
 INDICES_DIR = Path(os.environ.get("LEGALIZE_INDICES_DIR", "") or _SCRIPT_DIR / "indices")
 DEFAULT_LIMIT = int(os.environ.get("LEGALIZE_DEFAULT_LIMIT", "20"))

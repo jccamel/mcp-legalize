@@ -66,10 +66,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-*(Optional)* You can copy `.env.example` to `.env` to configure advanced paths or limits:
-```bash
-cp .env.example .env
-```
+*(Optional)* You can configure paths and limits via environment variables — see the top of `mcp_legalize.py` for the available options (`LEGALIZE_INDICES_DIR`, `LEGALIZE_DEFAULT_LIMIT`, `LEGALIZE_MAX_CONTENT_CHARS`).
 
 ---
 
