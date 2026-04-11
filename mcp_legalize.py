@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 try:
     from dotenv import load_dotenv
@@ -55,19 +55,6 @@ MAX_CONTENT_CHARS = int(os.environ.get("LEGALIZE_MAX_CONTENT_CHARS", "80000"))
 
 
 # ─────────────────────────── Modelos Pydantic ────────────────────────────────
-
-class DocumentoMeta(BaseModel):
-    titulo: str = ""
-    rango: str = ""
-    estado: str = ""
-    fecha_publicacion: str = ""
-    ultima_actualizacion: str = ""
-    fuente: str = ""
-    pais: str = ""
-    archivo: str = Field(default="", alias="_archivo")
-    ruta: str = Field(default="", alias="_ruta")
-    bytes_size: int = Field(default=0, alias="_bytes")
-    model_config = {"extra": "allow", "populate_by_name": True}
 
 class DocumentoResumen(BaseModel):
     id: str
@@ -132,11 +119,25 @@ class ErrorRespuesta(BaseModel):
     sugerencias: Optional[list[str]] = None
 
 
+# ─────────────────────────── Normalización (necesaria antes de cargar índices) ──
+
+_DIACRITICS_SRC = 'áéíóúàèìòùäëïöüñçåæøÄËÏÖÜÑÇÅÆØ'
+_DIACRITICS_DST = 'aeiouaeiouaeiouñcaaoaeiouñcaao'
+_NORMALIZE_TABLE = str.maketrans(_DIACRITICS_SRC, _DIACRITICS_DST)
+
+def _normalize(text: str) -> str:
+    return text.lower().translate(_NORMALIZE_TABLE)
+
+
 # ─────────────────────────── Carga Dinámica de Índices ────────────────────────
 
-_DOCS_POR_PAIS: dict[str, dict[str, DocumentoMeta]] = {}
+# Almacenamos los documentos como dicts crudos para evitar el coste de construir
+# 50k+ objetos Pydantic al arrancar. Pydantic solo se usa al serializar respuestas.
+_DOCS_POR_PAIS: dict[str, dict[str, dict]] = {}
 _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
+
+
 _PAIS_NOMBRE = {
     "es": "Spain",
     "se": "Sweden",
@@ -161,26 +162,24 @@ def _load_indices():
         print(f"[AVISO] Directorio de índices no encontrado: {INDICES_DIR}", file=sys.stderr)
         return
 
-    for index_path in sorted(INDICES_DIR.glob("*.json")):
+    for index_path in sorted(INDICES_DIR.glob("index_*.json")):
         try:
             with index_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 continue
-            
+
             meta = data.get("_meta", {})
             pais_code = meta.get("pais_predeterminado") or meta.get("pais") or index_path.stem.replace("index_", "")
 
             if "documentos" in data:
-                _DOCS_POR_PAIS[pais_code] = {
-                    doc_id: DocumentoMeta.model_validate(doc)
-                    for doc_id, doc in data["documentos"].items()
-                }
+                docs = data["documentos"]
+                _DOCS_POR_PAIS[pais_code] = docs
                 _META_POR_PAIS[pais_code] = meta
                 _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
-                
+
                 print(
-                    f"[Legalize MCP] [{pais_code.upper()}] {len(_DOCS_POR_PAIS[pais_code]):,} docs "
+                    f"[Legalize MCP] [{pais_code.upper()}] {len(docs):,} docs "
                     f"desde {index_path.name}",
                     file=sys.stderr,
                 )
@@ -195,37 +194,64 @@ print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_DOCS_POR_PAIS)
 # ─────────────────────────── Helpers ─────────────────────────────────────────
 
 _ARTICULO_PATTERNS_TEMPLATE = [
+    # Español / portugués: "Artículo 3", "Art. 3"
     r"(?im)art[ií]culo\s+{term}\b",
-    r"(?im)\bArt\.\s*{term}\b",
+    r"(?im)^\s*Art\.\s*{term}\b",
+    # Francés: "Article L135", "Article 3"
     r"(?im)\bArticle\s+{term}\b",
-    r"(?im)^{term}\s*§",
+    # Sueco: "##### 3 §" o "3 §" al inicio de línea (número ANTES del §)
+    r"(?im)^#{{0,6}}\s*{term}\s*§",
+    # Alemán / austriaco moderno: "##### § 3" o "§ 3" al inicio de línea (§ ANTES del número)
+    r"(?im)^#{{0,6}}\s*§\s*{term}\b",
+    # Austriaco antiguo: "§. 3."
+    r"(?im)^§\.\s*{term}\.",
+    # Fallback: número solo al inicio de línea (último recurso)
     r"(?im)^{term}\s*$",
 ]
+
+# Patrón que detecta el inicio de la SIGUIENTE sección para saber dónde cortar el texto extraído.
 _NEXT_SECTION_RE = re.compile(
-    r"(?i)art[ií]culo\s+\d+|^\d+\s*§|Article\s+[LRD]?\d+|^TÍTULO\s+|^CAPÍTULO\s+|^Kapitel\s+|^LIVRE\s+",
+    r"(?im)"
+    # Español/portugués
+    r"art[ií]culo\s+\d+|"
+    # Francés
+    r"Article\s+[LRD]?\d+|"
+    # Sueco: "3 §" o heading "## 2 kap."
+    r"^\d+\s*§|^#{1,6}\s*\d+\s+kap\b|"
+    # Alemán/austriaco moderno: "§ 3"
+    r"^#{0,6}\s*§\s*\d+|"
+    # Austriaco antiguo: "§. 3."
+    r"^§\.\s*\d+\.|"
+    # Estructuras de sección de nivel superior
+    r"^TÍTULO\s+|^CAPÍTULO\s+|^LIVRE\s+|"
+    r"^#{1,3}\s*(Buch|Teil|Abschnitt|Titel|Kapitel|Avdelning|Kapitel)\s+",
     re.MULTILINE,
 )
 
-def _doc_resumen(doc_id: str, doc: DocumentoMeta, pais: str) -> DocumentoResumen:
+def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
     return DocumentoResumen(
-        id=doc_id, pais=pais, titulo=doc.titulo, rango=doc.rango,
-        estado=doc.estado, fecha_publicacion=doc.fecha_publicacion,
-        ultima_actualizacion=doc.ultima_actualizacion, fuente=doc.fuente,
-        bytes=doc.bytes_size,
+        id=doc_id, pais=pais,
+        titulo=doc.get("titulo", ""),
+        rango=doc.get("rango", ""),
+        estado=doc.get("estado", ""),
+        fecha_publicacion=doc.get("fecha_publicacion", ""),
+        ultima_actualizacion=doc.get("ultima_actualizacion", ""),
+        fuente=doc.get("fuente", ""),
+        bytes=doc.get("_bytes", 0),
     )
 
-def _resolve_ruta(doc: DocumentoMeta, pais_code: str) -> Path:
-    base = Path(doc.ruta) if doc.ruta else Path(doc.archivo)
+def _resolve_ruta(doc: dict, pais_code: str) -> Path:
+    base = Path(doc.get("_ruta") or doc.get("_archivo", ""))
     if base.is_absolute():
         return base
-    
+
     meta = _META_POR_PAIS.get(pais_code, {})
     dir_base = meta.get("directorio_base")
     if dir_base:
         return _SCRIPT_DIR / dir_base / base
     return _SCRIPT_DIR / base
 
-def _read_file(doc: DocumentoMeta, pais_code: str) -> str:
+def _read_file(doc: dict, pais_code: str) -> str:
     ruta_resuelta = _resolve_ruta(doc, pais_code)
     try:
         return ruta_resuelta.read_text(encoding="utf-8", errors="replace")
@@ -240,18 +266,6 @@ def _strip_frontmatter(content: str) -> str:
         return content[m.end():].lstrip()
     return content
 
-def _normalize(text: str) -> str:
-    _DIACRITICS = {
-        'á':'a','é':'e','í':'i','ó':'o','ú':'u',
-        'à':'a','è':'e','ì':'i','ò':'o','ù':'u',
-        'ä':'a','ë':'e','ï':'i','ö':'o','ü':'u',
-        'ñ':'n','ç':'c','å':'a','æ':'a','ø':'o',
-        'Ä':'a','Ë':'e','Ï':'i','Ö':'o','Ü':'u','Ñ':'n','Ç':'c','Å':'a','Æ':'a','Ø':'o'
-    }
-    _src = ''.join(_DIACRITICS.keys())
-    _dst = ''.join(_DIACRITICS.values())
-    return text.lower().translate(str.maketrans(_src, _dst))
-
 def _iter_docs(pais: str = ""):
     if pais and pais in _DOCS_POR_PAIS:
         for doc_id, doc in _DOCS_POR_PAIS[pais].items():
@@ -262,10 +276,9 @@ def _iter_docs(pais: str = ""):
                 yield pais_code, doc_id, doc
 
 def _resolve_ley(id_ley: str, pais: str = ""):
-    """Resuelve un id (exacto o parcial) a (pais_code, doc_id, DocumentoMeta).
+    """Resuelve un id (exacto o parcial) a (pais_code, doc_id, doc_dict).
 
-    Devuelve (None, None, None, error_msg|None) en caso de no encontrarse o
-    ambigüedad. Si se especifica `pais`, solo busca en esa jurisdicción.
+    Devuelve (None, None, None, error_msg) en caso de no encontrarse o ambigüedad.
     """
     id_norm = id_ley.strip().upper().replace(".MD", "")
     paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
@@ -283,6 +296,7 @@ def _resolve_ley(id_ley: str, pais: str = ""):
             return None, None, None, f"ID ambiguo. Coincidencias: {[m[0] for m in matches[:10]]}"
 
     return None, None, None, f"Ley no encontrada: {id_ley}"
+
 
 
 # ─────────────────────────── Servidor MCP ────────────────────────────────────
@@ -309,7 +323,7 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
 
     resultado = []
     for pais_code, docs in _DOCS_POR_PAIS.items():
-        total_bytes = sum(d.bytes_size for d in docs.values())
+        total_bytes = sum(d.get("_bytes", 0) for d in docs.values())
         resultado.append(PaisInfo(
             codigo=pais_code,
             nombre=_PAIS_NOMBRE.get(pais_code, pais_code.upper()),
@@ -326,36 +340,59 @@ def buscar_ley(
     rango: str = "",
     estado: str = "",
     anno: str = "",
+    jurisdiccion: str = "",
+    fecha_desde: str = "",
+    fecha_hasta: str = "",
     limite: int = DEFAULT_LIMIT,
     offset: int = 0,
 ) -> list[DocumentoResumen] | ErrorRespuesta:
+    """
+    Busca leyes por múltiples criterios.
+
+    - consulta: texto libre contra el título.
+    - pais: código ISO (es, se, at, de, fr…).
+    - rango: tipo de norma (ley, forordning, Verordnung…).
+    - estado: in_force, repealed, partially_repealed, annulled, expired.
+    - anno: año exacto de publicación (e.g. "2001").
+    - jurisdiccion: sub-jurisdicción (e.g. "es-an", "es-ct").
+    - fecha_desde / fecha_hasta: rango de fechas de publicación (YYYY-MM-DD o YYYY).
+    - limite / offset: paginación.
+    """
     if not _DOCS_POR_PAIS:
         return ErrorRespuesta(error="No hay índices disponibles.")
-    
+
     if pais and pais not in _DOCS_POR_PAIS:
         return ErrorRespuesta(error=f"País '{pais}' no reconocido.", sugerencias=list(_DOCS_POR_PAIS.keys()))
 
     limite = min(max(1, limite), MAX_LIMIT)
-    q_norm = _normalize(consulta) if consulta else ""
-    rango_norm = _normalize(rango) if rango else ""
-    estado_norm = _normalize(estado) if estado else ""
-    anno_clean = anno.strip()
+    q_norm          = _normalize(consulta)     if consulta     else ""
+    rango_norm      = _normalize(rango)        if rango        else ""
+    estado_norm     = _normalize(estado)       if estado       else ""
+    jurisdiccion_norm = _normalize(jurisdiccion) if jurisdiccion else ""
+    anno_clean      = anno.strip()
+    fecha_desde_clean = fecha_desde.strip()
+    fecha_hasta_clean = fecha_hasta.strip()
 
     resultados = []
     skipped = 0
 
     for pais_code, doc_id, doc in _iter_docs(pais):
-        if q_norm and q_norm not in _normalize(doc.titulo): continue
-        if rango_norm and rango_norm not in _normalize(doc.rango): continue
-        if estado_norm and estado_norm not in _normalize(doc.estado): continue
-        if anno_clean and not doc.fecha_publicacion.startswith(anno_clean): continue
+        if q_norm            and q_norm            not in _normalize(doc.get("titulo", "")):        continue
+        if rango_norm        and rango_norm        not in _normalize(doc.get("rango", "")):         continue
+        if estado_norm       and estado_norm       not in _normalize(doc.get("estado", "")):        continue
+        if anno_clean        and not doc.get("fecha_publicacion", "").startswith(anno_clean):       continue
+        if jurisdiccion_norm and jurisdiccion_norm not in _normalize(doc.get("jurisdiccion", "")):  continue
+        fp = doc.get("fecha_publicacion", "")
+        if fecha_desde_clean and fp and fp < fecha_desde_clean: continue
+        if fecha_hasta_clean and fp and fp > fecha_hasta_clean: continue
 
         if skipped < offset:
             skipped += 1
             continue
 
         resultados.append(_doc_resumen(doc_id, doc, pais_code))
-        if len(resultados) >= limite: break
+        if len(resultados) >= limite:
+            break
 
     return resultados
 
@@ -371,7 +408,7 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     resultado = LeyCompleta(**resumen.model_dump())
 
     if not solo_metadata:
-        body = _strip_frontmatter(_read_file(found_doc, found_pais))
+        body = _strip_frontmatter(_read_file(found_doc, found_pais))  # type: ignore[arg-type]
         if len(body) > max_chars:
             resultado.texto = body[:max_chars]
             resultado.texto_truncado = True
@@ -395,6 +432,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
     term = re.escape(articulo_clean)
+    titulo = found_doc.get("titulo", "")
 
     for pattern_tpl in _ARTICULO_PATTERNS_TEMPLATE:
         m = re.search(pattern_tpl.format(term=term), content)
@@ -403,11 +441,11 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             next_art = _NEXT_SECTION_RE.search(content, m.end())
             end = min(next_art.start() if next_art else m.end() + contexto_chars, len(content))
             return ArticuloResultado(
-                id=found_id, pais=found_pais, titulo=found_doc.titulo,
+                id=found_id, pais=found_pais, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=content[start:end].strip(), posicion_caracter=start,
             )
 
-    return ArticuloResultado(id=found_id, pais=found_pais, titulo=found_doc.titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
+    return ArticuloResultado(id=found_id, pais=found_pais, titulo=titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
@@ -415,7 +453,7 @@ def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
     if pais and pais not in _DOCS_POR_PAIS: return ErrorRespuesta(error=f"País '{pais}' desconocido")
     conteo = {}
     for _, _, doc in _iter_docs(pais):
-        r = doc.rango or "desconocido"
+        r = doc.get("rango") or "desconocido"
         conteo[r] = conteo.get(r, 0) + 1
     return [RangoConteo(rango=r, total=c) for r, c in sorted(conteo.items(), key=lambda x: -x[1])]
 
@@ -425,12 +463,15 @@ def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
     estados, rangos, annos, total_bytes, paises_res = {}, {}, {}, 0, set()
     for p_code, _, doc in _iter_docs(pais):
         paises_res.add(p_code)
-        estados[doc.estado or "desconocido"] = estados.get(doc.estado or "desconocido", 0) + 1
-        rangos[doc.rango or "desconocido"] = rangos.get(doc.rango or "desconocido", 0) + 1
-        if doc.fecha_publicacion and len(doc.fecha_publicacion) >= 4:
-            a = doc.fecha_publicacion[:4]
+        e = doc.get("estado") or "desconocido"
+        estados[e] = estados.get(e, 0) + 1
+        r = doc.get("rango") or "desconocido"
+        rangos[r] = rangos.get(r, 0) + 1
+        fp = doc.get("fecha_publicacion", "")
+        if fp and len(fp) >= 4:
+            a = fp[:4]
             annos[a] = annos.get(a, 0) + 1
-        total_bytes += doc.bytes_size
+        total_bytes += doc.get("_bytes", 0)
 
     return Estadisticas(
         total_documentos=sum(estados.values()),

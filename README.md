@@ -77,6 +77,8 @@ cp .env.example .env
 
 This MCP server is completely structural: it doesn't contain the actual laws by default (except for testing mocks). You must clone the specific `legalize` countries you want your AI to know about into the `repos/` directory.
 
+All country repositories follow the [Legalize Format Spec](https://github.com/legalize-dev/legalize-es/blob/main/SPEC.md) defined by the original project.
+
 ```bash
 # Example: Adding Spain and Sweden
 git clone https://github.com/legalize-dev/legalize-es repos/legalize-es
