@@ -242,6 +242,20 @@ When new documents are indexed via `scripts/update_index.py`, the content is sca
 
 **Important**: This is a **canary alert**, not a blocker. An attacker with sufficient effort can evade pattern matching via creative obfuscation, encoding, or multilingual tricks. The real defense is the delimiter wrapping (Mitigation #1).
 
+#### 5. **Encoding Detection & Access Logging** (Defense-in-Depth)
+
+During document retrieval, the server detects suspicious encodings (Base64 blocks ≥60 chars, consecutive hex escape sequences):
+- Logs to `stderr` at `WARNING` level when detected (does not block content delivery).
+- Access logs recorded at `DEBUG` level (low noise, sanitized input).
+- All logs isolated from stdout to preserve JSON-RPC protocol integrity.
+
+#### 6. **Indexing Security Block** (Blocking Layer)
+
+The indexing script now enforces mandatory security review:
+- Halts indexing if dangerous patterns found and `--force-index-unsafe` flag not passed.
+- When bypassed, records an `security_warnings_acknowledged` field in index metadata with timestamp.
+- Operator must deliberately confirm unsafe indexation — no silent bypasses.
+
 ### Limitations & Remaining Risk
 
 #### What is **NOT** Covered
@@ -299,11 +313,15 @@ When new documents are indexed via `scripts/update_index.py`, the content is sca
    - Re-index to update the cache.
    - Check server logs for any unauthorized tool calls during the period the malicious content was indexed.
 
+6. **If Indexing Blocked by Security Warnings**:
+   - Review the files listed in stderr output.
+   - If false positives (e.g., legal text containing Base64 hashes), use `--force-index-unsafe` to bypass.
+   - The index will record the forced acknowledgment for audit purposes.
+
 ### References
 
 - **OWASP Top 10 for LLM Applications**: [LLM01 — Prompt Injection](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
 - **Indirect Prompt Injection**: Greshake et al. (2023), "Not what you've signed up for! Prompt Injection attacks against Web Search" — https://arxiv.org/abs/2302.12173
-- **Security Analysis**: See `SECURITY_REPORT.md` for a detailed threat model and penetration test results.
 
 ---
 
