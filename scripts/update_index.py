@@ -13,9 +13,11 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -26,6 +28,88 @@ DEFAULT_INDICES_DIR = _PROJECT_DIR / "indices"
 
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
+
+# Patrones heurísticos multilingües que pueden indicar prompt injection.
+# Cubren EN/ES/FR/DE/PT/SE — los idiomas del corpus Legalize.
+# IMPORTANTE: esto es un canario, NO una defensa. Un atacante determinado
+# puede evadirlo; la defensa real está en _wrap_untrusted (mcp_legalize.py).
+_INJECTION_PATTERNS = [
+    # ——— Inglés ———
+    re.compile(r"ignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|context|prompts?)", re.IGNORECASE),
+    re.compile(r"disregard\s+(all\s+)?(prior|previous|earlier|above)\s+(instructions?|context)", re.IGNORECASE),
+    re.compile(r"\byou\s+are\s+now\s+(in\s+)?(maintenance|developer|admin|god|system|debug)\b", re.IGNORECASE),
+    re.compile(r"\bnew\s+instructions?\s*:", re.IGNORECASE),
+    # ——— Español ———
+    re.compile(r"ignora\s+(las\s+|todas\s+las\s+)?instrucciones\s+(previas|anteriores)", re.IGNORECASE),
+    re.compile(r"olvida\s+(las\s+|todas\s+las\s+)?instrucciones", re.IGNORECASE),
+    re.compile(r"eres\s+ahora\s+(un|una|el|la)\s+", re.IGNORECASE),
+    # ——— Francés ———
+    re.compile(r"ignorez?\s+(toutes\s+)?(les\s+)?instructions?\s+(précédentes?|antérieures?)", re.IGNORECASE),
+    re.compile(r"oubliez?\s+(toutes\s+)?(les\s+)?instructions?", re.IGNORECASE),
+    # ——— Alemán ———
+    re.compile(r"ignoriere?\s+(alle\s+)?(vorherigen?|vorigen?|früheren?)\s+(anweisungen|befehle)", re.IGNORECASE),
+    re.compile(r"vergiss?\s+(alle\s+)?(vorherigen?|vorigen?)\s+", re.IGNORECASE),
+    # ——— Portugués ———
+    re.compile(r"ignore\s+(todas\s+)?(as\s+)?instru[cç][õo]es\s+(anteriores|pr[ée]vias)", re.IGNORECASE),
+    re.compile(r"esque[çc]a\s+(todas\s+)?(as\s+)?instru[cç][õo]es", re.IGNORECASE),
+    # ——— Sueco ———
+    re.compile(r"ignorera\s+(alla\s+)?(tidigare|föregående)\s+instruktioner", re.IGNORECASE),
+    re.compile(r"glöm\s+(alla\s+)?(tidigare|föregående)", re.IGNORECASE),
+    # ——— Marcadores de rol genéricos (cualquier idioma) ———
+    re.compile(r"^\s*(SYSTEM|ASSISTANT|USER|HUMAN)\s*:\s*", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"<\|(im_start|im_end|system|assistant|user)\|>", re.IGNORECASE),
+    # ——— Inyección técnica ———
+    re.compile(r"<\s*script[\s>]", re.IGNORECASE),
+    re.compile(r"\beval\s*\(", re.IGNORECASE),
+    re.compile(r"</\s*untrusted_content\s*>", re.IGNORECASE),  # intento de escape del wrap
+]
+
+def _normalize_for_scan(text: str) -> str:
+    """Normaliza texto para el escaneo de seguridad.
+
+    - NFKC: colapsa ligaduras y formas compatibles (p.ej. ideographic space
+      U+3000 → espacio normal, letras matemáticas estilizadas → ASCII).
+    - Elimina zero-width joiners y otros caracteres invisibles que suelen
+      usarse para ofuscar patrones (ig\u200Bnore → ignore).
+    """
+    normalized = unicodedata.normalize("NFKC", text)
+    # Caracteres invisibles comunes en ataques de ofuscación
+    invisible = (
+        "\u200b\u200c\u200d\u200e\u200f"  # zero-width space, joiner, marks
+        "\u2060\ufeff"                      # word joiner, BOM
+        "\u00ad"                            # soft hyphen
+    )
+    return normalized.translate({ord(c): None for c in invisible})
+
+def _check_injection(md_path: Path, text: str) -> bool:
+    """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
+
+    Canario multilingüe: emite aviso sin bloquear la indexación. La defensa
+    efectiva está en _wrap_untrusted (mcp_legalize.py).
+    """
+    # Eliminar frontmatter antes de escanear
+    body = text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            body = text[end + 4:]
+
+    # Normalizar para frustrar ofuscación básica
+    body_norm = _normalize_for_scan(body)
+
+    encontrado = False
+    for pattern in _INJECTION_PATTERNS:
+        m = pattern.search(body_norm)
+        if m:
+            snippet = body_norm[max(0, m.start() - 20):m.end() + 20].replace("\n", " ")
+            print(
+                f"  [AVISO SEGURIDAD] Patrón sospechoso en {md_path.name!r}: "
+                f"'{pattern.pattern[:60]}' (pos {m.start()})\n"
+                f"    contexto: …{snippet}…",
+                file=sys.stderr,
+            )
+            encontrado = True
+    return encontrado
 
 def _git_head_commit(repo_dir: Path) -> str:
     """Devuelve el hash del commit HEAD del repo git, o '' si no es un repo git."""
@@ -84,6 +168,7 @@ def _needs_update(existing: dict, stat: _StatInfo, force: bool) -> bool:
 
 def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict]:
     text = md_path.read_text(encoding="utf-8", errors="replace")
+    _check_injection(md_path, text)
     meta = _parse_frontmatter(text)
 
     try:
