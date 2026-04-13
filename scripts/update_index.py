@@ -388,6 +388,15 @@ def main() -> None:
     meta_idx["pais_predeterminado"] = fallback_pais
     meta_idx.setdefault("version", "2.0.0")
 
+    # Si se forzó la indexación con advertencias, dejar constancia en el índice
+    # para que un revisor posterior sepa que hubo que bypassar el bloqueo.
+    if security_warnings_found and args.force_index_unsafe:
+        meta_idx["security_warnings_acknowledged"] = {
+            "count": len(security_warnings_found),
+            "files": sorted(security_warnings_found.keys()),
+            "forced_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+
     commit = _git_head_commit(repo_dir)
     if commit:
         meta_idx["git_commit"] = commit
