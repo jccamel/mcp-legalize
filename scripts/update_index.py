@@ -60,6 +60,7 @@ _INJECTION_PATTERNS = [
     re.compile(r"<\|(im_start|im_end|system|assistant|user)\|>", re.IGNORECASE),
     # ——— Inyección técnica ———
     re.compile(r"<\s*script[\s>]", re.IGNORECASE),
+    re.compile(r"<!--|-->", re.IGNORECASE),  # comentarios HTML (pueden esconder instrucciones)
     re.compile(r"\beval\s*\(", re.IGNORECASE),
     re.compile(r"</\s*untrusted_content\s*>", re.IGNORECASE),  # intento de escape del wrap
 ]
@@ -81,11 +82,13 @@ def _normalize_for_scan(text: str) -> str:
     )
     return normalized.translate({ord(c): None for c in invisible})
 
-def _check_injection(md_path: Path, text: str) -> bool:
+def _check_injection(md_path: Path, text: str) -> list[str]:
     """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
 
-    Canario multilingüe: emite aviso sin bloquear la indexación. La defensa
-    efectiva está en _wrap_untrusted (mcp_legalize.py).
+    Devuelve lista de patrones encontrados (puede estar vacía).
+    Emite avisos para cada coincidencia.
+
+    Canario multilingüe: la defensa efectiva está en _wrap_untrusted (mcp_legalize.py).
     """
     # Eliminar frontmatter antes de escanear
     body = text
@@ -97,18 +100,19 @@ def _check_injection(md_path: Path, text: str) -> bool:
     # Normalizar para frustrar ofuscación básica
     body_norm = _normalize_for_scan(body)
 
-    encontrado = False
+    encontrado = []
     for pattern in _INJECTION_PATTERNS:
         m = pattern.search(body_norm)
         if m:
+            pattern_name = pattern.pattern[:40]
             snippet = body_norm[max(0, m.start() - 20):m.end() + 20].replace("\n", " ")
             print(
                 f"  [AVISO SEGURIDAD] Patrón sospechoso en {md_path.name!r}: "
-                f"'{pattern.pattern[:60]}' (pos {m.start()})\n"
+                f"'{pattern_name}' (pos {m.start()})\n"
                 f"    contexto: …{snippet}…",
                 file=sys.stderr,
             )
-            encontrado = True
+            encontrado.append(pattern_name)
     return encontrado
 
 def _git_head_commit(repo_dir: Path) -> str:
@@ -166,9 +170,13 @@ def _needs_update(existing: dict, stat: _StatInfo, force: bool) -> bool:
         return True
     return False
 
-def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict]:
+def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[str]]:
+    """Construye una entrada de índice para un documento .md.
+
+    Devuelve (doc_id, entry_dict, security_warnings_list)
+    """
     text = md_path.read_text(encoding="utf-8", errors="replace")
-    _check_injection(md_path, text)
+    security_warnings = _check_injection(md_path, text)
     meta = _parse_frontmatter(text)
 
     try:
@@ -215,7 +223,7 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         val = _get(*keys)
         if val:
             entry[field] = val
-    return doc_id, entry
+    return doc_id, entry, security_warnings
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,15 +251,21 @@ def _load_index(index_path: Path) -> dict:
         return {"_meta": {}, "documentos": {}}
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Mantiene índices de repositorios legales Legalize con detección de seguridad."
+    )
     parser.add_argument("--repo", type=Path, required=True,
                         help="Directorio del repositorio de un país (ej. repos/legalize-es).")
     parser.add_argument("--index", type=Path,
                         help="Ruta al index JSON a generar. Si no se indica, va a indices/.")
     parser.add_argument("--pais", type=str,
                         help="Código de país a usar como fallback si no se especifica en yaml (ej. es).")
-    parser.add_argument("--force-all", action="store_true")
-    parser.add_argument("--remove-orphans", action="store_true")
+    parser.add_argument("--force-all", action="store_true",
+                        help="Reindexar todos los documentos incluso si no han cambiado.")
+    parser.add_argument("--remove-orphans", action="store_true",
+                        help="Remover documentos del índice que ya no existen en disco.")
+    parser.add_argument("--force-index-unsafe", action="store_true",
+                        help="Ignorar advertencias de seguridad durante la indexación e indexar todos modos.")
     args = parser.parse_args()
 
     repo_dir = args.repo.resolve()
@@ -325,11 +339,15 @@ def main() -> None:
         return
 
     errores = 0
+    security_warnings_found = {}  # Rastrear avisos de seguridad por fichero
+
     # Procesar nuevos y actualizados
     for rel in nuevos + actualizados:
         md_path = md_files[rel]
         try:
-            doc_id, entry = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
+            doc_id, entry, security_warnings = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
+            if security_warnings:
+                security_warnings_found[rel] = security_warnings
             old_doc_id = ruta_a_docid.get(rel)
             if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
                 del documentos[old_doc_id]
@@ -337,6 +355,23 @@ def main() -> None:
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
             errores += 1
+
+    # Bloqueo de seguridad: si hay avisos y no se pasó --force-index-unsafe, abortar
+    if security_warnings_found and not args.force_index_unsafe:
+        print(
+            f"\n[SECURITY BLOCK] Se detectaron {len(security_warnings_found)} archivo(s) "
+            f"con patrones sospechosos. Abortando indexación.\n"
+            f"Archivos afectados:",
+            file=sys.stderr,
+        )
+        for fichero in sorted(security_warnings_found.keys()):
+            print(f"  - {fichero}", file=sys.stderr)
+        print(
+            f"\nPara continuar a pesar de las advertencias, usa:\n"
+            f"  python scripts/update_index.py --repo {args.repo.name} --force-index-unsafe",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.remove_orphans:
         for doc_id in huerfanos:

@@ -15,13 +15,23 @@ Configuración (fichero .env o variables de entorno):
 """
 
 import json
+import logging
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel
+
+# Configurar logging para auditoría de seguridad
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+_SECURITY_LOGGER = logging.getLogger("mcp_legalize.security")
 
 try:
     from fastmcp import FastMCP
@@ -222,6 +232,34 @@ _UNTRUSTED_CLOSE_RE = re.compile(
     r"</\s*untrusted_content\s*>|<\s*/?\s*untrusted_content\b",
     re.IGNORECASE,
 )
+
+# Patrones para detectar encodings sospechosos que podrían esconder instrucciones
+_SUSPICIOUS_ENCODING_PATTERNS = [
+    (re.compile(r"[A-Za-z0-9+/]{40,}={0,2}"), "base64_block"),
+    (re.compile(r"\\x[0-9a-f]{2}", re.IGNORECASE), "hex_escape_sequence"),
+    (re.compile(r"0x[0-9a-f]+", re.IGNORECASE), "hex_literal"),
+]
+
+def _check_suspicious_encoding(texto: str, doc_id: str = "") -> list[str]:
+    """Detecta bloques codificados sospechosos en el texto.
+
+    Busca patrones que comúnmente se usan para ofuscar instrucciones maliciosas:
+    - Bloques Base64 (40+ caracteres alphanumericos + slashes/pluses con padding)
+    - Literales hex (\\xHH, 0xHHHH)
+
+    Devuelve lista de tipos de encoding detectados (puede estar vacía si no hay).
+    Loguea warnings si encuentra algo.
+    """
+    findings = []
+    for pattern, encoding_type in _SUSPICIOUS_ENCODING_PATTERNS:
+        matches = pattern.finditer(texto)
+        for match in matches:
+            findings.append(encoding_type)
+            snippet = match.group()[:40] + ("..." if len(match.group()) > 40 else "")
+            _SECURITY_LOGGER.warning(
+                f"Suspicious encoding detected: {encoding_type} in {doc_id!r} | snippet: {snippet!r}"
+            )
+    return findings
 
 def _sanitize_attr(value: str) -> str:
     """Sanitiza un valor de atributo: elimina comillas, <, > y caracteres de control."""
@@ -499,6 +537,12 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     if err:
         return ErrorRespuesta(error=err)
 
+    # Log de acceso para auditoría
+    _SECURITY_LOGGER.info(
+        f"DOCUMENT_ACCESS | id={found_id} | country={found_pais} | "
+        f"full_text={not solo_metadata} | timestamp={datetime.now().isoformat()}"
+    )
+
     resumen = _doc_resumen(found_id, found_doc, found_pais)
     resultado = LeyCompleta(**resumen.model_dump())
 
@@ -512,6 +556,8 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
         else:
             texto = body
             resultado.texto_truncado = False
+        # Detectar encodings sospechosos en el cuerpo
+        _check_suspicious_encoding(texto, found_id)
         resultado.texto = _wrap_untrusted(texto, found_doc, found_pais)
 
     return resultado
@@ -525,6 +571,12 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if err:
         return ArticuloResultado(id=id_ley.strip().upper().replace(".MD", ""), pais=pais, titulo="", articulo_buscado=articulo, error=err)
 
+    # Log de acceso para auditoría
+    _SECURITY_LOGGER.info(
+        f"ARTICLE_ACCESS | id={found_id} | article={articulo.strip()[:50]} | "
+        f"country={found_pais} | timestamp={datetime.now().isoformat()}"
+    )
+
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
     term = re.escape(articulo_clean)
@@ -536,7 +588,10 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             start = m.start()
             next_art = _NEXT_SECTION_RE.search(content, m.end())
             end = min(next_art.start() if next_art else m.end() + contexto_chars, len(content))
-            fragmento = _wrap_untrusted(content[start:end].strip(), found_doc, found_pais)
+            fragmento_texto = content[start:end].strip()
+            # Detectar encodings sospechosos en el artículo extraído
+            _check_suspicious_encoding(fragmento_texto, f"{found_id}#{articulo_clean}")
+            fragmento = _wrap_untrusted(fragmento_texto, found_doc, found_pais)
             return ArticuloResultado(
                 id=found_id, pais=found_pais, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=fragmento, posicion_caracter=start,
