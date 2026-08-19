@@ -385,9 +385,18 @@ def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     - Valida con Path.is_relative_to() (más robusto que startswith sobre
       strings; evita prefijos ambiguos como 'repo' vs 'repo-evil').
     """
-    raw = doc.get("_ruta") or doc.get("_archivo", "")
+    # Solo '_ruta'. Antes se caía a '_archivo', que guarda el nombre pelado del
+    # fichero (md_path.name), no una ruta: con el layout real ('es/BOE-…md')
+    # resolvía a '<raiz>/BOE-…md', que no existe, y _read_file degradaba a
+    # cadena vacía. Quien llamaba no podía distinguir eso de una ley sin texto.
+    # Mejor fallar y que se regenere el índice.
+    raw = doc.get("_ruta", "")
     if not raw:
-        raise ValueError("Documento sin ruta registrada")
+        raise ValueError(
+            "Documento sin ruta registrada en '_ruta'. Si el índice se generó "
+            "con una versión anterior, regenéralo: "
+            "python scripts/update_index.py --repo <repo> --force-all"
+        )
 
     # Va primero a propósito: el mensaje usa !r para que un salto de línea en
     # la ruta no pueda inyectar líneas falsas en el log de seguridad.
