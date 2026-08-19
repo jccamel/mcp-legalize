@@ -359,10 +359,18 @@ def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
         bytes=doc.get("_bytes", 0),
     )
 
+# Caracteres de control en una ruta del índice. Ningún fichero legítimo los
+# lleva, y el byte nulo además sobrevive a Path.resolve() para hacer estallar
+# open() con ValueError — una excepción que _read_file no esperaba y que
+# escapaba hasta la capa de herramientas.
+_RUTA_CARACTERES_PROHIBIDOS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
 def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     """Resuelve la ruta de un documento, impidiendo escape del directorio base.
 
     Defensas:
+    - Rechaza rutas con caracteres de control (incluido el byte nulo), que
+      ninguna ruta legítima contiene.
     - Rechaza rutas absolutas en el índice (un índice malicioso no puede
       apuntar a /etc/passwd).
     - Resuelve symlinks vía Path.resolve() para detectar enlaces que escapen.
@@ -372,6 +380,11 @@ def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     raw = doc.get("_ruta") or doc.get("_archivo", "")
     if not raw:
         raise ValueError("Documento sin ruta registrada")
+
+    # Va primero a propósito: el mensaje usa !r para que un salto de línea en
+    # la ruta no pueda inyectar líneas falsas en el log de seguridad.
+    if _RUTA_CARACTERES_PROHIBIDOS_RE.search(raw):
+        raise ValueError(f"Ruta con caracteres de control no permitida: {raw!r}")
 
     base = Path(raw)
     if base.is_absolute():
@@ -403,7 +416,11 @@ def _read_file(doc: dict, pais_code: str) -> str:
         return ""
     try:
         return ruta_resuelta.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError además de OSError: open() la lanza ante rutas que el
+        # sistema de ficheros rechaza de plano. _resolve_ruta ya filtra el caso
+        # conocido, pero esta función no puede propagar nada a la capa de
+        # herramientas — una ley ilegible degrada a texto vacío, no a un fallo.
         return ""
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|\r\n|\Z)", re.DOTALL)
