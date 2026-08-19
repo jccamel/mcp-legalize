@@ -359,18 +359,26 @@ def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
         bytes=doc.get("_bytes", 0),
     )
 
-# Caracteres de control en una ruta del índice. Ningún fichero legítimo los
-# lleva, y el byte nulo además sobrevive a Path.resolve() para hacer estallar
-# open() con ValueError — una excepción que _read_file no esperaba y que
-# escapaba hasta la capa de herramientas.
-_RUTA_CARACTERES_PROHIBIDOS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Caracteres prohibidos en una ruta del índice. Ninguna ruta legítima los
+# lleva, y entran por dos motivos distintos:
+#   - \x00 sobrevive a Path.resolve() y hace estallar open() con ValueError,
+#     excepción que _read_file no esperaba y que escapaba hasta la capa de
+#     herramientas.
+#   - Todo lo que str.splitlines() trata como salto de línea permite fabricar
+#     líneas falsas en el log de seguridad, porque _read_file vuelca el
+#     mensaje de error a stderr. Además de los controles ASCII eso incluye
+#     U+0085, U+2028 y U+2029, que hay que nombrar aparte.
+_RUTA_CARACTERES_PROHIBIDOS_RE = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
 
 def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     """Resuelve la ruta de un documento, impidiendo escape del directorio base.
 
     Defensas:
-    - Rechaza rutas con caracteres de control (incluido el byte nulo), que
-      ninguna ruta legítima contiene.
+    - Rechaza rutas con caracteres prohibidos: el byte nulo y todo lo que
+      cuente como salto de línea, incluidos U+0085, U+2028 y U+2029.
+    - Formatea la ruta con !r en todos los mensajes de error, de modo que la
+      protección contra inyección en el log no dependa de que la lista de
+      caracteres prohibidos esté completa.
     - Rechaza rutas absolutas en el índice (un índice malicioso no puede
       apuntar a /etc/passwd).
     - Resuelve symlinks vía Path.resolve() para detectar enlaces que escapen.
@@ -388,7 +396,7 @@ def _resolve_ruta(doc: dict, pais_code: str) -> Path:
 
     base = Path(raw)
     if base.is_absolute():
-        raise ValueError(f"Ruta absoluta no permitida en índice: {raw}")
+        raise ValueError(f"Ruta absoluta no permitida en índice: {raw!r}")
 
     meta = _META_POR_PAIS.get(pais_code, {})
     dir_base = meta.get("directorio_base")
@@ -398,13 +406,13 @@ def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     try:
         ruta.relative_to(raiz)
     except ValueError:
-        raise ValueError(f"Ruta fuera del directorio permitido: {ruta}")
+        raise ValueError(f"Ruta fuera del directorio permitido: {str(ruta)!r}")
 
     # Defensa extra: si el fichero existe, asegurar que es un fichero regular
     # (no dispositivo, FIFO, etc.). No comprobamos is_symlink porque resolve()
     # ya ha seguido el symlink y la validación de raíz ya lo cubre.
     if ruta.exists() and not ruta.is_file():
-        raise ValueError(f"La ruta no apunta a un fichero regular: {ruta}")
+        raise ValueError(f"La ruta no apunta a un fichero regular: {str(ruta)!r}")
 
     return ruta
 
