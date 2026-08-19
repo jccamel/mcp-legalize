@@ -252,11 +252,16 @@ comment still trips the `block` patterns.
 **Processing**:
 - Text is normalized with Unicode NFKC to collapse ligatures and stylized variants.
 - Zero-width joiners, soft hyphens, and other invisible characters are removed.
+- Each pattern declares literal **gates** — substrings that must be present before
+  its regex runs. This pre-filter is what makes scanning a ~1 GB corpus viable
+  (roughly 75s for 12k files instead of several minutes).
 - Documents are scanned in full, with no size cap: `obtener_articulo` can extract
   text from any offset in a file, so truncating the scan would leave a blind spot
   in long statutes.
-- Findings are reported by stable pattern label (e.g. `es.ignora_instrucciones`)
-  instead of dumping the raw regex into the output.
+
+Run `python scripts/update_index.py --self-test` to verify that every pattern still
+detects its own sample *through* the gate pre-filter. A mistyped gate would
+otherwise silence its regex without any visible failure.
 
 **Important**: This is a **canary alert**, not a complete defense. An attacker with sufficient effort can evade pattern matching via creative obfuscation, encoding, or multilingual tricks. The real defense is the delimiter wrapping (Mitigation #1).
 
