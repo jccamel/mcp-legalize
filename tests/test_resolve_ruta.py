@@ -47,10 +47,15 @@ def test_resolves_a_nested_relative_path(repo_root):
 
 
 def test_accepts_a_path_that_does_not_exist_yet(repo_root):
-    """A missing file is not a security failure — `_read_file` handles it."""
+    """A missing file is not a security failure — `_read_file` handles it.
+
+    Containment is still asserted: a non-existent path must resolve inside the
+    root, otherwise the check would be trivially satisfiable by any typo.
+    """
     ruta = mcp_legalize._resolve_ruta(_doc(_ruta="test/MISSING.md"), PAIS)
 
     assert not ruta.exists()
+    assert ruta.is_relative_to(repo_root.resolve())
 
 
 # ─────────────────────────── Rejected ────────────────────────────────────────
@@ -157,6 +162,26 @@ def test_read_file_returns_empty_string_for_missing_file(repo_root):
 
 def test_read_file_returns_content_for_a_valid_document(repo_root):
     assert mcp_legalize._read_file(_doc(_ruta="test/LAW-1.md"), PAIS) == "body"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="mcp_legalize._read_file catches only OSError; read_text raises "
+           "ValueError on an embedded null byte and the exception escapes",
+)
+def test_read_file_degrades_on_a_path_the_filesystem_rejects(repo_root):
+    """`_read_file` must never raise into the tool layer, whatever the index says.
+
+    `_resolve_ruta` accepts an embedded null byte: `resolve()` tolerates it and
+    the path stays inside the root, so neither guard fires. The failure lands on
+    `read_text`, which raises `ValueError` — while `_read_file` only catches
+    `OSError`. The exception escapes and takes `obtener_ley` down with it.
+
+    A crafted index is exactly the threat `_resolve_ruta` is documented to
+    defend against, so this path is reachable. Marked xfail because the fix
+    belongs to `mcp_legalize.py`, not to this test branch.
+    """
+    assert mcp_legalize._read_file(_doc(_ruta="test/a\x00b.md"), PAIS) == ""
 
 
 # ─────────────────────────── Known defect: issue #1 / B3 ─────────────────────

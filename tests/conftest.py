@@ -14,6 +14,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 os.environ["LEGALIZE_INDICES_DIR"] = str(_PROJECT_ROOT / "tests" / "_no_such_indices")
@@ -33,6 +35,18 @@ def _load_module_from_path(name: str, path: Path):
     return module
 
 
-update_index = _load_module_from_path(
+_update_index = _load_module_from_path(
     "update_index", _PROJECT_ROOT / "scripts" / "update_index.py"
 )
+
+
+@pytest.fixture(scope="session")
+def update_index():
+    """The indexer script, exposed as a fixture.
+
+    Importing it straight from conftest (`from conftest import update_index`)
+    only works under pytest's default `prepend` import mode; it raises on
+    `--import-mode=importlib`. Fixtures are resolved by pytest itself, so they
+    work under either mode.
+    """
+    return _update_index
