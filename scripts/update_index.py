@@ -27,6 +27,15 @@ _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 DEFAULT_INDICES_DIR = _PROJECT_DIR / "indices"
 
+# Este script se ejecuta como `python scripts/update_index.py`, así que sys.path
+# arranca en scripts/ y la raíz del proyecto no es importable. Sin esto no se
+# puede compartir el parser de frontmatter con el servidor — y compartirlo es
+# precisamente lo que impide que escáner y servidor vuelvan a discrepar.
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
+
+import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
+
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
 
@@ -178,11 +187,15 @@ def _normalize_for_scan(text: str) -> str:
     return normalized
 
 def _strip_frontmatter_for_scan(text: str) -> str:
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            return text[end + 4:]
-    return text
+    """Delega en legalize_frontmatter: ver el módulo para las reglas.
+
+    Antes esto buscaba el primer "\\n---" con str.find, que trataba una regla
+    horizontal de Markdown como delimitador de cierre y descartaba todo lo que
+    hubiera encima. El servidor no cortaba ahí, así que el texto descartado se
+    servía igual: un payload colocado en esa franja llegaba al modelo sin haber
+    pasado nunca por los patrones de inyección.
+    """
+    return legalize_frontmatter.cuerpo(text)
 
 def _check_injection(text: str) -> list[_Finding]:
     """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
@@ -270,27 +283,13 @@ def _warn(msg: str) -> None:
     print(f"  [AVISO] {msg}", file=sys.stderr)
 
 def _parse_frontmatter(text: str) -> dict:
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    block = text[3:end].strip()
-    result: dict[str, str] = {}
-    for line in block.splitlines():
-        if ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2:
-            if (value.startswith('"') and value.endswith('"')) or \
-               (value.startswith("'") and value.endswith("'")):
-                value = value[1:-1]
-        result[key] = value
-    return result
+    """Delega en legalize_frontmatter: ver el módulo para las reglas.
+
+    Comparte la localización del bloque con el escáner y con el servidor, de
+    modo que los metadatos indexados salgan siempre de la misma región que los
+    otros dos consideran frontmatter.
+    """
+    return legalize_frontmatter.parsear(text)
 
 class _StatInfo(NamedTuple):
     size: int

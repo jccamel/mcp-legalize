@@ -1,15 +1,17 @@
 """Tests for the frontmatter boundary shared by the server and the indexer.
 
-Three separate implementations decide where frontmatter ends (issue #1, A2):
+Three entry points decide where frontmatter ends, and since issue #1 A2 was
+fixed all three delegate to `legalize_frontmatter`:
 
     mcp_legalize._strip_frontmatter            -> what the LLM is served
     update_index._strip_frontmatter_for_scan   -> what the injection scanner sees
     update_index._parse_frontmatter            -> what lands in the index
 
-The first two must agree. Where they do not, a band of text is delivered to the
-model that the scanner never inspected. The differential tests below pin the
-agreement as a contract and mark the known disagreements, so consolidating the
-three implementations turns them green instead of silently changing behaviour.
+The first two must agree. Where they did not, a band of text was delivered to
+the model that the scanner never inspected — a demonstrated evasion, not a
+theoretical risk. The differential tests below assert that agreement against
+the delegating call sites rather than against the shared module, so re-adding a
+private implementation to either side fails here.
 
 `update_index` arrives as a fixture rather than a direct import so the suite
 runs under both of pytest's import modes. See `conftest.update_index`.
@@ -127,7 +129,7 @@ def test_served_and_scanned_regions_match(update_index, document):
     assert strip_served(document).strip() == strip_scanned(update_index, document).strip()
 
 
-DIVERGING_DOCUMENTS = [
+FORMERLY_DIVERGING_DOCUMENTS = [
     pytest.param(
         '---\ntitulo: "X"\n----------\nBODY',
         id="horizontal-rule-after-unterminated-block",
@@ -139,13 +141,19 @@ DIVERGING_DOCUMENTS = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="issue #1 A2: the server's regex and the indexer's substring search "
-           "disagree on where frontmatter ends for these inputs",
-)
-@pytest.mark.parametrize("document", DIVERGING_DOCUMENTS)
-def test_served_and_scanned_regions_match_on_known_divergences(update_index, document):
+@pytest.mark.parametrize("document", FORMERLY_DIVERGING_DOCUMENTS)
+def test_served_and_scanned_regions_match_on_formerly_diverging_inputs(update_index, document):
+    """Regression guard for issue #1 A2.
+
+    These are the only two inputs of eight probed where the old parsers cut in
+    different places. Kept as their own case so a future rewrite that
+    reintroduces either split fails on the exact input that caught it.
+
+    Each also pins a rule the old implementations got wrong in opposite
+    directions: `----------` is a markdown rule and not a closing delimiter (the
+    indexer treated it as one), and an empty block is valid frontmatter (the
+    server refused to match it).
+    """
     assert strip_served(document).strip() == strip_scanned(update_index, document).strip()
 
 
@@ -175,29 +183,23 @@ def test_scanner_detects_the_payload_inside_a_well_formed_document(update_index)
     assert [f.label for f in findings] == ["en.ignore_previous"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="issue #1 A2: an unterminated frontmatter block followed by a "
-           "markdown rule of four or more dashes splits the two parsers, so "
-           "the payload is served to the model but never scanned",
-)
-def test_scanner_detects_the_payload_in_the_divergent_position(update_index):
-    """The consequence of A2, stated as the invariant that should hold.
+def test_scanner_detects_the_payload_in_the_formerly_divergent_position(update_index):
+    """The evasion from issue #1 A2, now closed.
 
-    The indexer's `find("\\n---")` stops at the rule and strips everything above
-    it, so the payload sits in the discarded region and no pattern runs over it.
-    The server's regex requires only whitespace after the closing `---`, fails
-    to match, and therefore serves the entire file — payload included.
+    The indexer's `find("\\n---")` used to stop at the markdown rule and strip
+    everything above it, so the payload sat in the discarded region and no
+    pattern ran over it — while the server's regex failed to match and served
+    the whole file, payload included. `_wrap_untrusted` still marked the text
+    untrusted, so it was never a full exploit; what failed was the canary, and
+    the document entered the index with nothing recorded in `_meta.seguridad`.
 
-    `_wrap_untrusted` still marks the text as untrusted, so this is not an
-    exploit on its own. It is a hole in the canary: the quarantine that should
-    have kept this document out of the index never fires.
-
-    Flips to passing once the two parsers share one implementation.
+    With one shared parser an unterminated block means the whole file is body,
+    so the scanner sees what the server serves and the finding fires.
     """
     findings = update_index._check_injection(EVASIVE_DOCUMENT)
 
     assert [f.label for f in findings] == ["en.ignore_previous"]
+    assert findings[0].severity == update_index.SEVERITY_BLOCK
 
 
 def test_the_payload_reaches_the_model():

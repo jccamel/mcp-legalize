@@ -24,6 +24,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+import legalize_frontmatter
+
 # Logger de seguridad aislado.
 # - Escribe SIEMPRE a stderr (stdout está reservado para el protocolo MCP JSON-RPC).
 # - No llama a basicConfig() para no contaminar el root logger de procesos que
@@ -431,13 +433,14 @@ def _read_file(doc: dict, pais_code: str) -> str:
         # herramientas — una ley ilegible degrada a texto vacío, no a un fallo.
         return ""
 
-_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|\r\n|\Z)", re.DOTALL)
-
 def _strip_frontmatter(content: str) -> str:
-    m = _FRONTMATTER_RE.match(content)
-    if m:
-        return content[m.end():].lstrip()
-    return content
+    """Delega en legalize_frontmatter: ver el módulo para las reglas.
+
+    Antes esto era un regex propio que discrepaba del que usa el escáner del
+    indexador. Cuando ambos cortaban en sitios distintos, el texto entregado al
+    modelo incluía una franja que nunca se había escaneado.
+    """
+    return legalize_frontmatter.cuerpo(content)
 
 def _iter_docs(pais: str = ""):
     if pais and pais in _DOCS_POR_PAIS:
