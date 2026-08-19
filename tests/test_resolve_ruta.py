@@ -3,6 +3,13 @@
 Every document the server returns is read from disk through this function. It is
 the only thing standing between a malicious or stale index entry and an
 arbitrary file read, so its contract is pinned here before any refactor moves it.
+
+Coverage gap: `test_rejects_symlink_escaping_the_root` skips wherever the
+platform refuses to create symlinks, which on Windows means everywhere without
+Developer Mode. That is the case exercising `Path.resolve()` following a link
+out of the corpus — the highest-value assertion in this module — and the repo
+has no CI, so today it runs nowhere. It reads as covered in the summary and is
+not. Running the suite once on Linux closes it.
 """
 
 import sys
@@ -129,26 +136,43 @@ def test_rejects_sibling_directory_with_shared_prefix(tmp_path, repo_root):
         pytest.param("test/a\rb.md", id="carriage-return"),
         pytest.param("test/a\x1bb.md", id="escape"),
         pytest.param("test/a\x7fb.md", id="delete"),
+        # Not ASCII controls, but str.splitlines() breaks on all three, so they
+        # forge log lines just as well.
+        pytest.param("test/a\x85b.md", id="u0085-next-line"),
+        pytest.param("test/a\u2028b.md", id="u2028-line-separator"),
+        pytest.param("test/a\u2029b.md", id="u2029-paragraph-separator"),
     ],
 )
 def test_rejects_control_characters_in_the_path(repo_root, ruta):
-    with pytest.raises(ValueError, match="caracteres de control"):
+    with pytest.raises(ValueError, match="caracteres prohibidos|control"):
         mcp_legalize._resolve_ruta(_doc(_ruta=ruta), PAIS)
 
 
-def test_control_character_rejection_runs_before_any_other_check(repo_root):
-    """Ordering matters: it keeps raw newlines out of the security log.
+LINE_BREAKING_CHARS = [
+    pytest.param("\n", id="lf"),
+    pytest.param("\r", id="cr"),
+    pytest.param("\x85", id="u0085"),
+    pytest.param("\u2028", id="u2028"),
+    pytest.param("\u2029", id="u2029"),
+]
 
-    `_read_file` prints the exception to stderr. If a later guard rejected the
-    path first, its message would embed the raw path and a crafted `_ruta`
-    could forge log lines. The control-character message uses `repr`, so the
-    newline stays escaped.
+
+@pytest.mark.parametrize("char", LINE_BREAKING_CHARS)
+def test_no_rejection_message_can_forge_a_security_log_line(repo_root, char):
+    """`_read_file` prints the rejection to stderr, so it must stay one line.
+
+    Asserted against `str.splitlines()` rather than against `"\\n"`, because
+    U+0085, U+2028 and U+2029 all start a new line there while passing a naive
+    newline check. An earlier version of the guard listed only ASCII controls
+    and let all three through to a later guard whose message interpolated the
+    path raw — which is exactly the forged line this test forbids.
     """
-    with pytest.raises(ValueError) as excinfo:
-        mcp_legalize._resolve_ruta(_doc(_ruta="/absolute\nFAKE LOG LINE.md"), PAIS)
+    ruta = f"/absolute{char}FAKE [SEGURIDAD] todo ok.md"
 
-    assert "caracteres de control" in str(excinfo.value)
-    assert "\n" not in str(excinfo.value)
+    with pytest.raises(ValueError) as excinfo:
+        mcp_legalize._resolve_ruta(_doc(_ruta=ruta), PAIS)
+
+    assert len(str(excinfo.value).splitlines()) == 1
 
 
 def test_rejects_document_without_any_path(repo_root):
@@ -207,24 +231,52 @@ def test_read_file_degrades_on_a_path_the_filesystem_rejects(repo_root):
     assert mcp_legalize._read_file(_doc(_ruta="test/a\x00b.md"), PAIS) == ""
 
 
+def test_read_file_degrades_when_the_read_itself_raises_value_error(repo_root, monkeypatch):
+    """Covers the `ValueError` half of `_read_file`'s `except (OSError, ValueError)`.
+
+    `_resolve_ruta` now rejects the one input known to reach `read_text` with a
+    `ValueError`, which leaves that handler with no natural caller — delete the
+    `ValueError` from the tuple and every other test still passes. The handler
+    is kept because the guard cannot enumerate every path a filesystem may
+    refuse, so it is driven directly here rather than left as untested code.
+    """
+    def _boom(*args, **kwargs):
+        raise ValueError("simulated filesystem rejection")
+
+    monkeypatch.setattr(mcp_legalize.Path, "read_text", _boom)
+
+    assert mcp_legalize._read_file(_doc(_ruta="test/LAW-1.md"), PAIS) == ""
+
+
+def test_read_file_degrades_when_the_read_raises_os_error(repo_root, monkeypatch):
+    def _boom(*args, **kwargs):
+        raise OSError("simulated I/O failure")
+
+    monkeypatch.setattr(mcp_legalize.Path, "read_text", _boom)
+
+    assert mcp_legalize._read_file(_doc(_ruta="test/LAW-1.md"), PAIS) == ""
+
+
 # ─────────────────────────── Known defect: issue #1 / B3 ─────────────────────
 
 @pytest.mark.xfail(
     strict=True,
-    reason="issue #1 B3: `_archivo` holds a bare filename, so the fallback "
-           "silently resolves outside the document's actual directory and the "
-           "document comes back empty instead of erroring",
+    reason="issue #1 B3: the `_archivo` fallback resolves a bare filename "
+           "against the repository root, so the document silently comes back "
+           "empty instead of the entry being rejected",
 )
-def test_archivo_fallback_does_not_silently_resolve_to_the_wrong_file(repo_root):
-    """An index entry with only `_archivo` must fail loudly, not read nothing.
+def test_archivo_only_entry_is_rejected_instead_of_resolving_somewhere_wrong(repo_root):
+    """An index entry carrying only `_archivo` must fail loudly.
 
-    `_archivo` is written as `md_path.name`. For the real nested layout
-    (`test/LAW-1.md`) the fallback builds `<root>/LAW-1.md`, which does not
-    exist, and `_read_file` swallows the error and returns an empty string.
-    A caller cannot distinguish that from a genuinely empty law.
+    `_archivo` is written as `md_path.name` — a bare filename, not a path.
+    For the real nested layout (`test/LAW-1.md`) the fallback builds
+    `<root>/LAW-1.md`, which does not exist, and `_read_file` degrades to an
+    empty string that a caller cannot tell apart from a genuinely empty law.
+
+    The assertion is a raise, matching the fix proposed in issue #1 B3 (drop
+    the fallback). Asserting the *correct nested path* instead would make this
+    xfail unflippable: removing the fallback would still not produce that path,
+    so `strict=True` would never signal that B3 had been closed.
     """
-    doc = _doc(_archivo="LAW-1.md")
-
-    ruta = mcp_legalize._resolve_ruta(doc, PAIS)
-
-    assert ruta == (repo_root / "test" / "LAW-1.md").resolve()
+    with pytest.raises(ValueError):
+        mcp_legalize._resolve_ruta(_doc(_archivo="LAW-1.md"), PAIS)
