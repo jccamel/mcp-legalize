@@ -121,6 +121,36 @@ def test_rejects_sibling_directory_with_shared_prefix(tmp_path, repo_root):
         mcp_legalize._resolve_ruta(_doc(_ruta="../legalize-test-evil/payload.md"), PAIS)
 
 
+@pytest.mark.parametrize(
+    "ruta",
+    [
+        pytest.param("test/a\x00b.md", id="null-byte"),
+        pytest.param("test/a\nb.md", id="newline"),
+        pytest.param("test/a\rb.md", id="carriage-return"),
+        pytest.param("test/a\x1bb.md", id="escape"),
+        pytest.param("test/a\x7fb.md", id="delete"),
+    ],
+)
+def test_rejects_control_characters_in_the_path(repo_root, ruta):
+    with pytest.raises(ValueError, match="caracteres de control"):
+        mcp_legalize._resolve_ruta(_doc(_ruta=ruta), PAIS)
+
+
+def test_control_character_rejection_runs_before_any_other_check(repo_root):
+    """Ordering matters: it keeps raw newlines out of the security log.
+
+    `_read_file` prints the exception to stderr. If a later guard rejected the
+    path first, its message would embed the raw path and a crafted `_ruta`
+    could forge log lines. The control-character message uses `repr`, so the
+    newline stays escaped.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        mcp_legalize._resolve_ruta(_doc(_ruta="/absolute\nFAKE LOG LINE.md"), PAIS)
+
+    assert "caracteres de control" in str(excinfo.value)
+    assert "\n" not in str(excinfo.value)
+
+
 def test_rejects_document_without_any_path(repo_root):
     with pytest.raises(ValueError, match="sin ruta"):
         mcp_legalize._resolve_ruta(_doc(titulo="no path at all"), PAIS)
@@ -164,22 +194,15 @@ def test_read_file_returns_content_for_a_valid_document(repo_root):
     assert mcp_legalize._read_file(_doc(_ruta="test/LAW-1.md"), PAIS) == "body"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="mcp_legalize._read_file catches only OSError; read_text raises "
-           "ValueError on an embedded null byte and the exception escapes",
-)
 def test_read_file_degrades_on_a_path_the_filesystem_rejects(repo_root):
     """`_read_file` must never raise into the tool layer, whatever the index says.
 
-    `_resolve_ruta` accepts an embedded null byte: `resolve()` tolerates it and
-    the path stays inside the root, so neither guard fires. The failure lands on
-    `read_text`, which raises `ValueError` — while `_read_file` only catches
-    `OSError`. The exception escapes and takes `obtener_ley` down with it.
-
-    A crafted index is exactly the threat `_resolve_ruta` is documented to
-    defend against, so this path is reachable. Marked xfail because the fix
-    belongs to `mcp_legalize.py`, not to this test branch.
+    Before the control-character guard, an embedded null byte survived both
+    checks in `_resolve_ruta` — `resolve()` tolerates it and the path stays
+    inside the root — and only failed at `read_text`, which raises `ValueError`
+    while `_read_file` caught just `OSError`. The exception escaped and took
+    `obtener_ley` with it. A crafted index is the documented threat model, so
+    the path was reachable.
     """
     assert mcp_legalize._read_file(_doc(_ruta="test/a\x00b.md"), PAIS) == ""
 
