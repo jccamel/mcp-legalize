@@ -227,7 +227,7 @@ The `_resolve_ruta()` function prevents reading files outside the indexed reposi
 When new documents are indexed via `scripts/update_index.py`, the content is scanned for suspicious patterns:
 
 **Patterns detected** (multilingüe):
-- English: `ignore all previous instructions`, `you are now ...`, `SYSTEM:`, `eval(`
+- English: `ignore all previous instructions`, `you are now ...`, `SYSTEM:`
 - Español: `ignora las instrucciones previas`, `eres ahora ...`
 - Francés: `ignorez toutes les instructions`
 - Deutsch: `ignoriere alle vorherigen Anweisungen`
@@ -235,12 +235,30 @@ When new documents are indexed via `scripts/update_index.py`, the content is sca
 - Svenska: `ignorera alla tidigare instruktioner`
 - Universal markers: `<|im_start|>`, `<script>`, close tag escapes
 
+Each pattern carries a **severity**:
+
+| Severity | Effect |
+|---|---|
+| `block` | The file is quarantined — excluded from the index. |
+| `warn` | Recorded and counted only; the file is indexed normally. |
+
+`warn` covers findings that are suspicious in isolation but produce almost only
+false positives on a real legal corpus — HTML comments (`<!-- ... -->`) and
+`eval(`. Spanish BOE texts embed XSD/XML schemas inside technical annexes, so a
+comment is noise, not signal. A comment also hides nothing from the scanner: the
+scan runs over raw text without interpreting markup, so an instruction inside a
+comment still trips the `block` patterns.
+
 **Processing**:
 - Text is normalized with Unicode NFKC to collapse ligatures and stylized variants.
 - Zero-width joiners, soft hyphens, and other invisible characters are removed.
-- Matches emit `[AVISO SEGURIDAD]` to stderr with snippet context; indexing continues.
+- Documents are scanned in full, with no size cap: `obtener_articulo` can extract
+  text from any offset in a file, so truncating the scan would leave a blind spot
+  in long statutes.
+- Findings are reported by stable pattern label (e.g. `es.ignora_instrucciones`)
+  instead of dumping the raw regex into the output.
 
-**Important**: This is a **canary alert**, not a blocker. An attacker with sufficient effort can evade pattern matching via creative obfuscation, encoding, or multilingual tricks. The real defense is the delimiter wrapping (Mitigation #1).
+**Important**: This is a **canary alert**, not a complete defense. An attacker with sufficient effort can evade pattern matching via creative obfuscation, encoding, or multilingual tricks. The real defense is the delimiter wrapping (Mitigation #1).
 
 #### 5. **Encoding Detection & Access Logging** (Defense-in-Depth)
 

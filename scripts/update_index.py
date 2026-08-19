@@ -29,91 +29,148 @@ DEFAULT_INDICES_DIR = _PROJECT_DIR / "indices"
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
 
+# ─────────────────────────── Escaneo de prompt injection ─────────────────────
+#
 # Patrones heurísticos multilingües que pueden indicar prompt injection.
 # Cubren EN/ES/FR/DE/PT/SE — los idiomas del corpus Legalize.
 # IMPORTANTE: esto es un canario, NO una defensa. Un atacante determinado
 # puede evadirlo; la defensa real está en _wrap_untrusted (mcp_legalize.py).
-_INJECTION_PATTERNS = [
+#
+# Cada patrón declara:
+#   - severity: BLOCK  -> hallazgo accionable; bloquea la indexación.
+#               WARN   -> solo informativo; no bloquea.
+#   - label:    nombre estable del patrón, para reportarlo sin volcar el regex
+#               crudo en la salida.
+
+SEVERITY_BLOCK = "block"
+SEVERITY_WARN = "warn"
+
+class _InjectionPattern(NamedTuple):
+    label: str
+    severity: str
+    regex: "re.Pattern[str]"
+
+def _pat(label: str, severity: str, source: str,
+         flags: int = re.IGNORECASE) -> _InjectionPattern:
+    return _InjectionPattern(label, severity, re.compile(source, flags))
+
+_INJECTION_PATTERNS: list[_InjectionPattern] = [
     # ——— Inglés ———
-    re.compile(r"ignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|context|prompts?)", re.IGNORECASE),
-    re.compile(r"disregard\s+(all\s+)?(prior|previous|earlier|above)\s+(instructions?|context)", re.IGNORECASE),
-    re.compile(r"\byou\s+are\s+now\s+(in\s+)?(maintenance|developer|admin|god|system|debug)\b", re.IGNORECASE),
-    re.compile(r"\bnew\s+instructions?\s*:", re.IGNORECASE),
+    _pat("en.ignore_previous", SEVERITY_BLOCK,
+         r"ignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|context|prompts?)"),
+    _pat("en.disregard_prior", SEVERITY_BLOCK,
+         r"disregard\s+(all\s+)?(prior|previous|earlier|above)\s+(instructions?|context)"),
+    _pat("en.role_override", SEVERITY_BLOCK,
+         r"\byou\s+are\s+now\s+(in\s+)?(maintenance|developer|admin|god|system|debug)\b"),
+    _pat("en.new_instructions", SEVERITY_BLOCK,
+         r"\bnew\s+instructions?\s*:"),
     # ——— Español ———
-    re.compile(r"ignora\s+(las\s+|todas\s+las\s+)?instrucciones\s+(previas|anteriores)", re.IGNORECASE),
-    re.compile(r"olvida\s+(las\s+|todas\s+las\s+)?instrucciones", re.IGNORECASE),
-    re.compile(r"eres\s+ahora\s+(un|una|el|la)\s+", re.IGNORECASE),
+    _pat("es.ignora_instrucciones", SEVERITY_BLOCK,
+         r"ignora\s+(las\s+|todas\s+las\s+)?instrucciones\s+(previas|anteriores)"),
+    _pat("es.olvida_instrucciones", SEVERITY_BLOCK,
+         r"olvida\s+(las\s+|todas\s+las\s+)?instrucciones"),
+    _pat("es.eres_ahora", SEVERITY_BLOCK,
+         r"eres\s+ahora\s+(un|una|el|la)\s+"),
     # ——— Francés ———
-    re.compile(r"ignorez?\s+(toutes\s+)?(les\s+)?instructions?\s+(précédentes?|antérieures?)", re.IGNORECASE),
-    re.compile(r"oubliez?\s+(toutes\s+)?(les\s+)?instructions?", re.IGNORECASE),
+    _pat("fr.ignorez_instructions", SEVERITY_BLOCK,
+         r"ignorez?\s+(toutes\s+)?(les\s+)?instructions?\s+(précédentes?|antérieures?)"),
+    _pat("fr.oubliez_instructions", SEVERITY_BLOCK,
+         r"oubliez?\s+(toutes\s+)?(les\s+)?instructions?"),
     # ——— Alemán ———
-    re.compile(r"ignoriere?\s+(alle\s+)?(vorherigen?|vorigen?|früheren?)\s+(anweisungen|befehle)", re.IGNORECASE),
-    re.compile(r"vergiss?\s+(alle\s+)?(vorherigen?|vorigen?)\s+", re.IGNORECASE),
+    _pat("de.ignoriere_anweisungen", SEVERITY_BLOCK,
+         r"ignoriere?\s+(alle\s+)?(vorherigen?|vorigen?|früheren?)\s+(anweisungen|befehle)"),
+    _pat("de.vergiss_vorherige", SEVERITY_BLOCK,
+         r"vergiss?\s+(alle\s+)?(vorherigen?|vorigen?)\s+"),
     # ——— Portugués ———
-    re.compile(r"ignore\s+(todas\s+)?(as\s+)?instru[cç][õo]es\s+(anteriores|pr[ée]vias)", re.IGNORECASE),
-    re.compile(r"esque[çc]a\s+(todas\s+)?(as\s+)?instru[cç][õo]es", re.IGNORECASE),
+    _pat("pt.ignore_instrucoes", SEVERITY_BLOCK,
+         r"ignore\s+(todas\s+)?(as\s+)?instru[cç][õo]es\s+(anteriores|pr[ée]vias)"),
+    _pat("pt.esqueca_instrucoes", SEVERITY_BLOCK,
+         r"esque[çc]a\s+(todas\s+)?(as\s+)?instru[cç][õo]es"),
     # ——— Sueco ———
-    re.compile(r"ignorera\s+(alla\s+)?(tidigare|föregående)\s+instruktioner", re.IGNORECASE),
-    re.compile(r"glöm\s+(alla\s+)?(tidigare|föregående)", re.IGNORECASE),
+    _pat("se.ignorera_instruktioner", SEVERITY_BLOCK,
+         r"ignorera\s+(alla\s+)?(tidigare|föregående)\s+instruktioner"),
+    _pat("se.glom_tidigare", SEVERITY_BLOCK,
+         r"glöm\s+(alla\s+)?(tidigare|föregående)"),
     # ——— Marcadores de rol genéricos (cualquier idioma) ———
-    re.compile(r"^\s*(SYSTEM|ASSISTANT|USER|HUMAN)\s*:\s*", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"<\|(im_start|im_end|system|assistant|user)\|>", re.IGNORECASE),
+    _pat("generic.role_prefix", SEVERITY_BLOCK,
+         r"^\s*(SYSTEM|ASSISTANT|USER|HUMAN)\s*:\s*", re.IGNORECASE | re.MULTILINE),
+    _pat("generic.chatml_token", SEVERITY_BLOCK,
+         r"<\|(im_start|im_end|system|assistant|user)\|>"),
     # ——— Inyección técnica ———
-    re.compile(r"<\s*script[\s>]", re.IGNORECASE),
-    re.compile(r"<!--|-->", re.IGNORECASE),  # comentarios HTML (pueden esconder instrucciones)
-    re.compile(r"\beval\s*\(", re.IGNORECASE),
-    re.compile(r"</\s*untrusted_content\s*>", re.IGNORECASE),  # intento de escape del wrap
+    _pat("tech.script_tag", SEVERITY_BLOCK,
+         r"<\s*script[\s>]"),
+    _pat("tech.untrusted_escape", SEVERITY_BLOCK,
+         r"</\s*untrusted_content\s*>"),
+    # Comentario HTML: NO bloquea. El corpus BOE incorpora esquemas XSD/XML
+    # dentro de los anexos técnicos de las normas, así que un comentario es
+    # ruido, no señal. Además no oculta nada al escáner: si el comentario
+    # contuviera una instrucción, los patrones BLOCK de arriba la verían
+    # igualmente, porque escanean el texto completo sin interpretar markup.
+    _pat("tech.html_comment", SEVERITY_WARN,
+         r"<!--|-->"),
+    # `eval(` es sospechoso en un texto legal, pero no accionable por sí solo.
+    _pat("tech.eval_call", SEVERITY_WARN,
+         r"\beval\s*\("),
 ]
+
+# Caracteres invisibles usados habitualmente para ofuscar patrones.
+_INVISIBLE_CHARS = (
+    "\u200b\u200c\u200d\u200e\u200f"  # zero-width space, joiner, marks
+    "\u2060\ufeff"                      # word joiner, BOM
+    "\u00ad"                            # soft hyphen
+)
+_INVISIBLE_TABLE = {ord(c): None for c in _INVISIBLE_CHARS}
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+class _Finding(NamedTuple):
+    label: str
+    severity: str
+    pos: int
+    snippet: str
 
 def _normalize_for_scan(text: str) -> str:
     """Normaliza texto para el escaneo de seguridad.
 
     - NFKC: colapsa ligaduras y formas compatibles (p.ej. ideographic space
-      U+3000 → espacio normal, letras matemáticas estilizadas → ASCII).
+      U+3000 -> espacio normal, letras matematicas estilizadas -> ASCII).
     - Elimina zero-width joiners y otros caracteres invisibles que suelen
-      usarse para ofuscar patrones (ig\u200Bnore → ignore).
+      usarse para ofuscar patrones (ig\u200bnore -> ignore).
     """
-    normalized = unicodedata.normalize("NFKC", text)
-    # Caracteres invisibles comunes en ataques de ofuscación
-    invisible = (
-        "\u200b\u200c\u200d\u200e\u200f"  # zero-width space, joiner, marks
-        "\u2060\ufeff"                      # word joiner, BOM
-        "\u00ad"                            # soft hyphen
-    )
-    return normalized.translate({ord(c): None for c in invisible})
+    return unicodedata.normalize("NFKC", text).translate(_INVISIBLE_TABLE)
 
-def _check_injection(md_path: Path, text: str) -> list[str]:
-    """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
-
-    Devuelve lista de patrones encontrados (puede estar vacía).
-    Emite avisos para cada coincidencia.
-
-    Canario multilingüe: la defensa efectiva está en _wrap_untrusted (mcp_legalize.py).
-    """
-    # Eliminar frontmatter antes de escanear
-    body = text
+def _strip_frontmatter_for_scan(text: str) -> str:
     if text.startswith("---"):
         end = text.find("\n---", 3)
         if end != -1:
-            body = text[end + 4:]
+            return text[end + 4:]
+    return text
 
-    # Normalizar para frustrar ofuscación básica
-    body_norm = _normalize_for_scan(body)
+def _check_injection(text: str) -> list[_Finding]:
+    """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
 
-    encontrado = []
+    Devuelve la lista de hallazgos (puede estar vacia). No imprime nada: quien
+    llama decide que reportar y que bloquear segun la severidad.
+
+    El escaneo cubre el documento COMPLETO, sin techo de tamano: obtener_articulo
+    (mcp_legalize.py) puede extraer texto desde cualquier posicion del fichero,
+    asi que truncar el escaneo abriria un hueco en las normas largas.
+
+    Canario multilingue: la defensa efectiva esta en _wrap_untrusted (mcp_legalize.py).
+    """
+    body_norm = _normalize_for_scan(_strip_frontmatter_for_scan(text))
+
+    hallazgos: list[_Finding] = []
     for pattern in _INJECTION_PATTERNS:
-        m = pattern.search(body_norm)
-        if m:
-            pattern_name = pattern.pattern[:40]
-            snippet = body_norm[max(0, m.start() - 20):m.end() + 20].replace("\n", " ")
-            print(
-                f"  [AVISO SEGURIDAD] Patrón sospechoso en {md_path.name!r}: "
-                f"'{pattern_name}' (pos {m.start()})\n"
-                f"    contexto: …{snippet}…",
-                file=sys.stderr,
-            )
-            encontrado.append(pattern_name)
-    return encontrado
+        m = pattern.regex.search(body_norm)
+        if not m:
+            continue
+        raw = body_norm[max(0, m.start() - 20):m.end() + 20]
+        hallazgos.append(_Finding(
+            pattern.label, pattern.severity, m.start(),
+            _CONTROL_CHARS_RE.sub(" ", raw),
+        ))
+    return hallazgos
 
 def _git_head_commit(repo_dir: Path) -> str:
     """Devuelve el hash del commit HEAD del repo git, o '' si no es un repo git."""
@@ -170,13 +227,13 @@ def _needs_update(existing: dict, stat: _StatInfo, force: bool) -> bool:
         return True
     return False
 
-def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[str]]:
+def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding]]:
     """Construye una entrada de índice para un documento .md.
 
-    Devuelve (doc_id, entry_dict, security_warnings_list)
+    Devuelve (doc_id, entry_dict, hallazgos_de_seguridad)
     """
     text = md_path.read_text(encoding="utf-8", errors="replace")
-    security_warnings = _check_injection(md_path, text)
+    hallazgos = _check_injection(text)
     meta = _parse_frontmatter(text)
 
     try:
@@ -223,7 +280,7 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         val = _get(*keys)
         if val:
             entry[field] = val
-    return doc_id, entry, security_warnings
+    return doc_id, entry, hallazgos
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,15 +396,22 @@ def main() -> None:
         return
 
     errores = 0
-    security_warnings_found = {}  # Rastrear avisos de seguridad por fichero
+    security_warnings_found = {}  # Ficheros con hallazgos bloqueantes
 
     # Procesar nuevos y actualizados
     for rel in nuevos + actualizados:
         md_path = md_files[rel]
         try:
-            doc_id, entry, security_warnings = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
-            if security_warnings:
-                security_warnings_found[rel] = security_warnings
+            doc_id, entry, hallazgos = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
+            bloqueantes = [h for h in hallazgos if h.severity == SEVERITY_BLOCK]
+            if bloqueantes:
+                security_warnings_found[rel] = [h.label for h in bloqueantes]
+                for h in bloqueantes:
+                    print(
+                        f"  [AVISO SEGURIDAD] {rel}: {h.label} (pos {h.pos})\n"
+                        f"    contexto: …{h.snippet}…",
+                        file=sys.stderr,
+                    )
             old_doc_id = ruta_a_docid.get(rel)
             if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
                 del documentos[old_doc_id]
@@ -356,7 +420,8 @@ def main() -> None:
             _warn(f"Error en {rel}: {exc}")
             errores += 1
 
-    # Bloqueo de seguridad: si hay avisos y no se pasó --force-index-unsafe, abortar
+    # Bloqueo de seguridad: si hay hallazgos bloqueantes y no se pasó
+    # --force-index-unsafe, abortar
     if security_warnings_found and not args.force_index_unsafe:
         print(
             f"\n[SECURITY BLOCK] Se detectaron {len(security_warnings_found)} archivo(s) "
