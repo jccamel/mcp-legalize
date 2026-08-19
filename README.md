@@ -272,12 +272,36 @@ During document retrieval, the server detects suspicious encodings (Base64 block
 - Access logs recorded at `DEBUG` level (low noise, sanitized input).
 - All logs isolated from stdout to preserve JSON-RPC protocol integrity.
 
-#### 6. **Indexing Security Block** (Blocking Layer)
+#### 6. **Per-File Quarantine** (Blocking Layer)
 
-The indexing script now enforces mandatory security review:
-- Halts indexing if dangerous patterns found and `--force-index-unsafe` flag not passed.
-- When bypassed, records an `security_warnings_acknowledged` field in index metadata with timestamp.
-- Operator must deliberately confirm unsafe indexation — no silent bypasses.
+A `block` finding removes **that file** from the index. It never aborts the run:
+the remaining documents are indexed as usual. A handful of suspicious files must
+not leave twelve thousand legitimate ones unsearchable — an all-or-nothing block
+is a self-inflicted denial of service, not a security control.
+
+- A file already in the index that later trips a `block` pattern is **removed**
+  from it. Serving it is worse than not having it.
+- Quarantined files are listed on stderr with matched pattern and context.
+- Index metadata records the full state under `_meta.seguridad`:
+
+  | Field | Meaning |
+  |---|---|
+  | `cuarentena` | Files excluded from the index, with matched pattern labels. |
+  | `forzados` | Files indexed despite a `block` finding, via `--force-index-unsafe`. |
+  | `avisos` | Files with `warn`-level findings; indexed normally. |
+
+  This state is **merged** across runs: an incremental run only rescans new or
+  modified files, so findings for untouched files stay on record. Entries are
+  purged only when the file disappears from disk.
+
+**Relevant flags**:
+
+| Flag | Effect |
+|---|---|
+| `--force-index-unsafe` | Index quarantined files anyway; each is recorded under `forzados`. |
+| `--fail-on-quarantine` | Exit with code `3` if anything was quarantined. The index is still written — intended for CI. |
+| `--show-warnings` | Print `warn`-level findings too (counted in the summary by default). |
+| `--self-test` | Verify the security patterns and exit; requires no repository. |
 
 ### Limitations & Remaining Risk
 
@@ -325,7 +349,7 @@ The indexing script now enforces mandatory security review:
    - Recent commits are from expected maintainers.
    - No sudden changes to repository size or structure.
 
-2. **Monitor Indexing Alerts**: When running `update_index.py`, monitor stderr for `[AVISO SEGURIDAD]` lines. Investigate any unexpected patterns.
+2. **Monitor Indexing Alerts**: When running `update_index.py`, watch stderr for `[CUARENTENA]` and `[FORZADO]` lines, and review `_meta.seguridad` in the generated index. In CI, add `--fail-on-quarantine` so a new quarantined file breaks the build instead of passing unnoticed.
 
 3. **Regular Re-indexing**: Keep indices up to date by running `check_updates.py` and `update_index.py` regularly. Older indices may miss patches or malware detection.
 
@@ -336,10 +360,13 @@ The indexing script now enforces mandatory security review:
    - Re-index to update the cache.
    - Check server logs for any unauthorized tool calls during the period the malicious content was indexed.
 
-6. **If Indexing Blocked by Security Warnings**:
-   - Review the files listed in stderr output.
-   - If false positives (e.g., legal text containing Base64 hashes), use `--force-index-unsafe` to bypass.
-   - The index will record the forced acknowledgment for audit purposes.
+6. **If Files Are Quarantined**:
+   - The index is still written; only the quarantined files are missing from it.
+   - Review each file listed under `[CUARENTENA]` in stderr — the matched pattern and surrounding context are printed with it.
+   - If they are false positives, re-run with `--force-index-unsafe`. Each forced file is recorded under `_meta.seguridad.forzados` for audit.
+   - Prefer fixing the pattern over forcing the file: a `block` pattern that keeps
+     matching legitimate legal text is a bug in the pattern. Add a sample and run
+     `--self-test` after changing one.
 
 ### References
 

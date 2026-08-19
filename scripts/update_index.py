@@ -37,8 +37,8 @@ _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct"
 # puede evadirlo; la defensa real está en _wrap_untrusted (mcp_legalize.py).
 #
 # Cada patrón declara:
-#   - severity: BLOCK  -> hallazgo accionable; bloquea la indexación.
-#               WARN   -> solo informativo; no bloquea.
+#   - severity: BLOCK  -> el fichero se pone en cuarentena (no entra al índice).
+#               WARN   -> solo informativo; el fichero se indexa igualmente.
 #   - gates:    literales en minúsculas que DEBEN aparecer en el texto para que
 #               el regex llegue a ejecutarse. Es un pre-filtro: `str.find` corre
 #               un orden de magnitud más rápido que el regex, y el corpus pesa
@@ -405,7 +405,13 @@ def main() -> None:
     parser.add_argument("--remove-orphans", action="store_true",
                         help="Remover documentos del índice que ya no existen en disco.")
     parser.add_argument("--force-index-unsafe", action="store_true",
-                        help="Ignorar advertencias de seguridad durante la indexación e indexar todos modos.")
+                        help="Indexar también los ficheros en cuarentena por seguridad.")
+    parser.add_argument("--fail-on-quarantine", action="store_true",
+                        help="Salir con código 3 si algún fichero quedó en cuarentena. "
+                             "El índice se escribe igualmente; pensado para CI.")
+    parser.add_argument("--show-warnings", action="store_true",
+                        help="Mostrar también los hallazgos informativos (severidad warn), "
+                             "que por defecto solo se cuentan en el resumen.")
     parser.add_argument("--self-test", action="store_true",
                         help="Verificar los patrones de seguridad y salir.")
     args = parser.parse_args()
@@ -487,47 +493,74 @@ def main() -> None:
         return
 
     errores = 0
-    security_warnings_found = {}  # Ficheros con hallazgos bloqueantes
+    # Ficheros excluidos del índice por hallazgos de severidad `block`.
+    cuarentena: dict[str, list[str]] = {}
+    # Ficheros con hallazgos `block` que se indexaron por --force-index-unsafe.
+    forzados: dict[str, list[str]] = {}
+    # Ficheros con hallazgos `warn`: se indexan igual, solo se registran.
+    avisos: dict[str, list[str]] = {}
 
-    # Procesar nuevos y actualizados
-    for rel in nuevos + actualizados:
+    pendientes = nuevos + actualizados
+
+    for rel in pendientes:
         md_path = md_files[rel]
         try:
             doc_id, entry, hallazgos = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
-            bloqueantes = [h for h in hallazgos if h.severity == SEVERITY_BLOCK]
-            if bloqueantes:
-                security_warnings_found[rel] = [h.label for h in bloqueantes]
-                for h in bloqueantes:
-                    print(
-                        f"  [AVISO SEGURIDAD] {rel}: {h.label} (pos {h.pos})\n"
-                        f"    contexto: …{h.snippet}…",
-                        file=sys.stderr,
-                    )
-            old_doc_id = ruta_a_docid.get(rel)
-            if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
-                del documentos[old_doc_id]
-            documentos[doc_id] = entry
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
             errores += 1
+            continue
 
-    # Bloqueo de seguridad: si hay hallazgos bloqueantes y no se pasó
-    # --force-index-unsafe, abortar
-    if security_warnings_found and not args.force_index_unsafe:
+        bloqueantes = [h for h in hallazgos if h.severity == SEVERITY_BLOCK]
+        informativos = [h for h in hallazgos if h.severity == SEVERITY_WARN]
+
+        if informativos:
+            avisos[rel] = [h.label for h in informativos]
+            if args.show_warnings:
+                for h in informativos:
+                    print(f"  [aviso] {rel}: {h.label} (pos {h.pos}) …{h.snippet}…",
+                          file=sys.stderr)
+
+        if bloqueantes:
+            etiquetas = [h.label for h in bloqueantes]
+            if args.force_index_unsafe:
+                # Se indexa igualmente, pero queda constancia en el índice de
+                # que alguien bypasseó el bloqueo y de qué se bypasseó.
+                forzados[rel] = etiquetas
+                print(f"  [FORZADO] {rel}: {', '.join(etiquetas)}", file=sys.stderr)
+            else:
+                cuarentena[rel] = etiquetas
+                for h in bloqueantes:
+                    print(f"  [CUARENTENA] {rel}: {h.label} (pos {h.pos})\n"
+                          f"      contexto: …{h.snippet}…", file=sys.stderr)
+                # Si el fichero ya estaba indexado y ahora resulta sospechoso,
+                # se retira: dejarlo servido sería peor que no tenerlo.
+                old_doc_id = ruta_a_docid.get(rel)
+                if old_doc_id:
+                    documentos.pop(old_doc_id, None)
+                continue
+
+        old_doc_id = ruta_a_docid.get(rel)
+        if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
+            del documentos[old_doc_id]
+        documentos[doc_id] = entry
+
+    # La cuarentena es por fichero, nunca global: un puñado de documentos
+    # sospechosos no puede dejar sin índice a los otros doce mil.
+    if cuarentena:
         print(
-            f"\n[SECURITY BLOCK] Se detectaron {len(security_warnings_found)} archivo(s) "
-            f"con patrones sospechosos. Abortando indexación.\n"
-            f"Archivos afectados:",
+            f"\n[SEGURIDAD] {len(cuarentena)} fichero(s) en cuarentena "
+            f"(excluidos del índice, el resto se indexa igualmente).",
             file=sys.stderr,
         )
-        for fichero in sorted(security_warnings_found.keys()):
-            print(f"  - {fichero}", file=sys.stderr)
+        for fichero in sorted(cuarentena):
+            print(f"  - {fichero}: {', '.join(cuarentena[fichero])}", file=sys.stderr)
+        repo_arg = args.repo.as_posix()
         print(
-            f"\nPara continuar a pesar de las advertencias, usa:\n"
-            f"  python scripts/update_index.py --repo {args.repo.name} --force-index-unsafe",
+            f"\nSi revisaste los ficheros y son legítimos, indéxalos con:\n"
+            f"  python scripts/update_index.py --repo {repo_arg} --force-index-unsafe",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     if args.remove_orphans:
         for doc_id in huerfanos:
@@ -544,14 +577,33 @@ def main() -> None:
     meta_idx["pais_predeterminado"] = fallback_pais
     meta_idx.setdefault("version", "2.0.0")
 
-    # Si se forzó la indexación con advertencias, dejar constancia en el índice
-    # para que un revisor posterior sepa que hubo que bypassar el bloqueo.
-    if security_warnings_found and args.force_index_unsafe:
-        meta_idx["security_warnings_acknowledged"] = {
-            "count": len(security_warnings_found),
-            "files": sorted(security_warnings_found.keys()),
-            "forced_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+    # Estado de seguridad del índice, para que un revisor posterior sepa qué
+    # quedó fuera y por qué — o qué se forzó a entrar.
+    #
+    # Se fusiona con la corrida anterior: una pasada incremental solo escanea
+    # los ficheros nuevos o modificados, así que los hallazgos de los que no se
+    # tocaron siguen siendo válidos y no pueden desaparecer del registro. Solo
+    # se purgan los ficheros que ya no están en disco.
+    previo = meta_idx.get("seguridad") or {}
+    escaneados = set(pendientes)
+
+    def _fusionar(clave: str, nuevos: dict[str, list[str]]) -> dict[str, list[str]]:
+        conservados = {
+            f: v for f, v in (previo.get(clave) or {}).items()
+            if f in md_files and f not in escaneados
         }
+        conservados.update({f: sorted(labels) for f, labels in nuevos.items()})
+        return dict(sorted(conservados.items()))
+
+    meta_idx["seguridad"] = {
+        "escaneado_en": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        "cuarentena": _fusionar("cuarentena", cuarentena),
+        "forzados": _fusionar("forzados", forzados),
+        "avisos": _fusionar("avisos", avisos),
+    }
+    # El esquema anterior guardaba esto bajo otra clave; se retira para no dejar
+    # dos fuentes de verdad sobre el mismo hecho.
+    meta_idx.pop("security_warnings_acknowledged", None)
 
     commit = _git_head_commit(repo_dir)
     if commit:
@@ -564,6 +616,20 @@ def main() -> None:
     except Exception as exc:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
+
+    seguridad = meta_idx["seguridad"]
+    print(f"Indexados         : {len(documentos):,}")
+    if seguridad["avisos"]:
+        print(f"Avisos            : {len(seguridad['avisos']):,} (informativos, indexados)")
+    if seguridad["forzados"]:
+        print(f"Forzados          : {len(seguridad['forzados']):,} (indexados pese al bloqueo)")
+    if seguridad["cuarentena"]:
+        print(f"Cuarentena        : {len(seguridad['cuarentena']):,} (excluidos del índice)")
+    if errores:
+        print(f"Errores           : {errores:,}")
+
+    if cuarentena and args.fail_on_quarantine:
+        sys.exit(3)
 
 if __name__ == "__main__":
     main()
