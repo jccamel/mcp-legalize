@@ -13,3 +13,4 @@ repos/*
 indices/*
 !indices/.gitkeep
 !indices/index_legalize-mock.json
+.pytest_cache/
