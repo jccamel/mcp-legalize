@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -378,6 +379,54 @@ def _write_atomic(path: Path, data: dict) -> None:
             pass
         raise
 
+class _Progress:
+    """Reporta avance a stderr durante el escaneo.
+
+    Escanear el corpus completo lleva decenas de segundos. Sin esto el script
+    queda mudo el tiempo suficiente para que parezca colgado y alguien lo mate
+    con Ctrl+C — que es exactamente lo que pasaba antes.
+    """
+
+    def __init__(self, total_files: int, total_bytes: int, cada: float = 0.5):
+        self.total_files = total_files
+        self.total_bytes = max(total_bytes, 1)
+        self.cada = cada
+        self.files = 0
+        self.bytes = 0
+        self.inicio = time.monotonic()
+        self._ultimo = 0.0
+        self._activo = sys.stderr.isatty()
+
+    def avanzar(self, nbytes: int) -> None:
+        self.files += 1
+        self.bytes += nbytes
+        ahora = time.monotonic()
+        if ahora - self._ultimo < self.cada and self.files < self.total_files:
+            return
+        self._ultimo = ahora
+        transcurrido = ahora - self.inicio
+        frac = self.bytes / self.total_bytes
+        eta = (transcurrido / frac - transcurrido) if frac > 0.01 else 0.0
+        linea = (
+            f"  escaneando {self.files:,}/{self.total_files:,} "
+            f"({frac * 100:5.1f}%)  {self.bytes / 1_048_576:,.0f} MiB  "
+            f"ETA {eta:4.0f}s"
+        )
+        if self._activo:
+            print(f"\r{linea:<78}", end="", file=sys.stderr, flush=True)
+        elif self.files == self.total_files or self.files % 2000 == 0:
+            print(linea, file=sys.stderr, flush=True)
+
+    def cerrar(self) -> None:
+        transcurrido = time.monotonic() - self.inicio
+        if self._activo:
+            print("\r" + " " * 78 + "\r", end="", file=sys.stderr)
+        mibs = self.bytes / 1_048_576 / max(transcurrido, 0.001)
+        print(
+            f"Escaneados        : {self.files:,} ficheros, "
+            f"{self.bytes / 1_048_576:,.0f} MiB en {transcurrido:.1f}s ({mibs:,.0f} MiB/s)"
+        )
+
 def _load_index(index_path: Path) -> dict:
     if not index_path.exists():
         return {"_meta": {}, "documentos": {}}
@@ -418,6 +467,14 @@ def main() -> None:
 
     if args.self_test:
         sys.exit(_self_test())
+
+    # El progreso y los avisos van a stderr (sin buffer) y el resto a stdout.
+    # Sin esto, al redirigir la salida a un fichero o a un log de CI, stdout
+    # queda en buffer de bloque y el informe aparece desordenado.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, OSError):
+        pass
 
     if args.repo is None:
         parser.error("se requiere --repo (salvo con --self-test)")
@@ -501,9 +558,11 @@ def main() -> None:
     avisos: dict[str, list[str]] = {}
 
     pendientes = nuevos + actualizados
+    progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
 
     for rel in pendientes:
         md_path = md_files[rel]
+        progreso.avanzar(md_stats[rel].size)
         try:
             doc_id, entry, hallazgos = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
         except Exception as exc:
@@ -544,6 +603,8 @@ def main() -> None:
         if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
             del documentos[old_doc_id]
         documentos[doc_id] = entry
+
+    progreso.cerrar()
 
     # La cuarentena es por fichero, nunca global: un puñado de documentos
     # sospechosos no puede dejar sin índice a los otros doce mil.
