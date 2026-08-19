@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 
+# Tooling scratch: auto-generated, machine-local absolute paths
+.atl/
+
 # Local repos and indices
 repos/*
 !repos/.gitkeep
