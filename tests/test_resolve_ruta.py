@@ -259,24 +259,36 @@ def test_read_file_degrades_when_the_read_raises_os_error(repo_root, monkeypatch
 
 # ─────────────────────────── Known defect: issue #1 / B3 ─────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="issue #1 B3: the `_archivo` fallback resolves a bare filename "
-           "against the repository root, so the document silently comes back "
-           "empty instead of the entry being rejected",
-)
 def test_archivo_only_entry_is_rejected_instead_of_resolving_somewhere_wrong(repo_root):
-    """An index entry carrying only `_archivo` must fail loudly.
+    """An index entry carrying only `_archivo` fails loudly. Issue #1 B3.
 
-    `_archivo` is written as `md_path.name` — a bare filename, not a path.
-    For the real nested layout (`test/LAW-1.md`) the fallback builds
-    `<root>/LAW-1.md`, which does not exist, and `_read_file` degrades to an
-    empty string that a caller cannot tell apart from a genuinely empty law.
+    `_archivo` holds `md_path.name` — a bare filename, not a path. The old
+    fallback built `<root>/LAW-1.md` for a document actually living at
+    `test/LAW-1.md`; the file did not exist, `_read_file` degraded to an empty
+    string, and a caller could not tell that apart from a law with no text.
 
-    The assertion is a raise, matching the fix proposed in issue #1 B3 (drop
-    the fallback). Asserting the *correct nested path* instead would make this
-    xfail unflippable: removing the fallback would still not produce that path,
-    so `strict=True` would never signal that B3 had been closed.
+    Rejecting is the fix issue #1 B3 proposed first. The alternative — making
+    `_archivo` hold the relative path — was not taken: two fields meaning the
+    same thing is what created the ambiguity to begin with.
     """
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="sin ruta"):
         mcp_legalize._resolve_ruta(_doc(_archivo="LAW-1.md"), PAIS)
+
+
+def test_missing_path_error_says_how_to_recover(repo_root):
+    """A stale index is an operator problem, so the message must be actionable.
+
+    This is the one rejection reason that is not an attack: it means the index
+    predates `_ruta`. Naming the regeneration command turns a dead end into a
+    fix.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        mcp_legalize._resolve_ruta(_doc(_archivo="LAW-1.md"), PAIS)
+
+    assert "update_index.py" in str(excinfo.value)
+    assert "--force-all" in str(excinfo.value)
+
+
+def test_read_file_degrades_for_an_archivo_only_entry(repo_root):
+    """The tool layer still degrades — the raise is caught and logged, not thrown."""
+    assert mcp_legalize._read_file(_doc(_archivo="LAW-1.md"), PAIS) == ""
