@@ -158,6 +158,37 @@ Once connected, your AI will have access to the following tools:
 - `listar_rangos` — Lists available norm types and their frequency in the corpus.
 - `estadisticas` — Returns global metrics of the loaded datasets.
 
+### Why the tool names are Spanish and the values are not
+
+**The keys belong to this server. The values belong to the law.**
+
+Tool names, parameters and response fields are Spanish (`buscar_ley`, `titulo`,
+`rango`, `estado`). The values inside them are reproduced verbatim from the
+source document and are never translated:
+
+```json
+{ "titulo": "Constitución Española",
+  "rango":  "constitucion",     // literal, from the corpus `rank` field
+  "estado": "in_force" }        // literal, from the corpus `status` field
+```
+
+This is not an oversight, and the mixture is not arbitrary. Two facts decide it:
+
+1. **The corpus is English and it is not ours.** All 12,291 Spanish documents
+   carry English frontmatter keys — `title`, `rank`, `status`, `source` — defined
+   by the upstream [Legalize Format Spec](https://github.com/legalize-dev/legalize-es/blob/main/SPEC.md).
+   This server maps them onto Spanish keys when it indexes; the values it never
+   touches.
+2. **Translating them would be a defect.** This is a legal-text server. Returning
+   something other than what the source says is the one thing it must not do —
+   and half the vocabulary could not be translated anyway. `real_decreto`,
+   `ley_organica` and `orden` are Spanish legal instruments with no English
+   equivalent, and they arrive that way from the corpus.
+
+So `estado` takes one of four generic English values (`in_force`, `repealed`,
+`expired`, `annulled`) while `rango` takes one of nineteen Spanish ones. Both
+are the source document's own words.
+
 ---
 
 ## 🔒 Security Architecture

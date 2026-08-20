@@ -535,6 +535,12 @@ alternativas concretas — un id ambiguo devuelve ahí las leyes que coinciden.
 La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
 la ley, para no tener que buscarla otra vez.
+
+Idioma: las CLAVES de la respuesta son de este servidor y van en castellano;
+los VALORES se reproducen literalmente del documento fuente y nunca se traducen.
+Por eso `estado` trae valores en inglés (in_force, repealed, expired, annulled)
+y `rango` en castellano (ley, real_decreto, ley_organica...): son las palabras
+de la propia norma. No infieras el idioma del contenido a partir de la clave.
 """,
 )
 
