@@ -104,6 +104,7 @@ def _self_test() -> int:
         return 1
     print(f"self-test OK - {total} patrones detectan su muestra por el camino "
           f"real ({n_cuerpo} en cuerpo, {n_meta} en metadatos).")
+    print(f"huella del ruleset de cuerpo: {legalize_injection.huella()}")
     return 0
 
 def _git_head_commit(repo_dir: Path) -> str:
@@ -362,6 +363,24 @@ def main() -> None:
     print(f"Ficheros en disco : {len(md_files):,}")
     print(f"Entradas en índice: {len(documentos):,}")
 
+    # Una pasada incremental solo escanea lo que cambió en disco, asi que si el
+    # ruleset cambia los documentos intactos conservan una auditoria hecha con
+    # reglas que ya no existen — y `escaneado_en` se refresca igual, con lo que
+    # la fecha pasa a mentir. Cuando la huella no coincide se reescanea todo.
+    huella_actual = legalize_injection.huella()
+    huella_previa = (meta_idx.get("seguridad") or {}).get("patrones")
+    ruleset_cambiado = bool(documentos) and huella_previa != huella_actual
+    if ruleset_cambiado:
+        if huella_previa:
+            print(f"\nReglas de escaneo : {huella_previa} -> {huella_actual} (cambiaron)")
+        else:
+            print(f"\nReglas de escaneo : {huella_actual} "
+                  f"(el índice no registra con cuáles se escaneó)")
+        print("                    Se reescanea el corpus completo: la auditoría "
+              "anterior ya no es\n                    comparable.")
+
+    forzar = args.force_all or ruleset_cambiado
+
     nuevos = []
     actualizados = []
     renombrados = []
@@ -371,7 +390,7 @@ def main() -> None:
         old_doc_id = ruta_a_docid.get(rel)
         if old_doc_id is not None:
             docids_validos.add(old_doc_id)
-            if _needs_update(documentos.get(old_doc_id, {}), md_stats[rel], args.force_all):
+            if _needs_update(documentos.get(old_doc_id, {}), md_stats[rel], forzar):
                 actualizados.append(rel)
         else:
             nuevos.append(rel)
@@ -495,6 +514,9 @@ def main() -> None:
 
     meta_idx["seguridad"] = {
         "escaneado_en": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        # Con QUE se auditó, no solo cuándo. Sin esto un cambio de patrón deja
+        # el índice con fecha fresca y hallazgos calculados con reglas viejas.
+        "patrones": huella_actual,
         "cuarentena": _fusionar("cuarentena", cuarentena),
         "forzados": _fusionar("forzados", forzados),
         "avisos": _fusionar("avisos", avisos),

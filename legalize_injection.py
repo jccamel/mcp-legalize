@@ -38,6 +38,7 @@ en el servidor. Lo que este módulo garantiza es que el canario no cante en un
 idioma distinto según por dónde entre el texto.
 """
 
+import hashlib
 import re
 import unicodedata
 from typing import NamedTuple
@@ -318,6 +319,32 @@ def regex_filtro(surface: str) -> "re.Pattern[str]":
     compilado = re.compile("|".join(_alternativa(p) for p in patrones(surface)))
     _FILTRO_CACHE[surface] = compilado
     return compilado
+
+
+def huella(surface: str = SURFACE_BODY) -> str:
+    """Huella estable del conjunto de patrones de una superficie.
+
+    Identifica CON QUÉ se auditó un documento. El índice ya registraba cuándo se
+    escaneó, pero no bajo qué reglas, así que cambiar un patrón dejaba 12.291
+    documentos con una fecha reciente y una auditoría caducada, sin forma de
+    distinguirlos salvo reindexando a ciegas.
+
+    Es una huella del contenido y no un número de versión a mano por el mismo
+    motivo que el vocabulario es uno solo: lo que depende de que alguien se
+    acuerde de actualizarlo, se desincroniza. Cubre todo lo que cambia el
+    resultado de un escaneo — etiqueta, severidad, gates y la forma canónica del
+    regex con sus flags. Los gates entran porque uno mal escrito silencia su
+    patrón, que es precisamente como `en.role_override` estuvo mudo.
+
+    Va ordenada por etiqueta: reordenar la tabla sin tocarla no cambia lo que se
+    detecta, y las etiquetas se guardan ordenadas en el índice, así que un
+    cambio de orden no debe costar un reescaneo del corpus entero.
+    """
+    partes = sorted(
+        "".join((p.label, p.severity, "".join(p.gates), _alternativa(p)))
+        for p in patrones(surface)
+    )
+    return hashlib.sha256("".join(partes).encode("utf-8")).hexdigest()[:12]
 
 
 # ─────────────────────────── Acción sobre metadatos ──────────────────────────
