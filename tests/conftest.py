@@ -77,7 +77,7 @@ def indexer_cli(tmp_path):
     indice = tmp_path / "index.json"
 
     # El hijo escribe su informe con la codificacion de la consola, que en
-    # Windows es cp1252. Sin forzarla, los acentos llegan aqui como caracteres
+    # Windows es cp1252. Sin forzarla, los acentos llegan aquí como caracteres
     # de reemplazo y cualquier assert sobre un mensaje real falla por el
     # transporte y no por el comportamiento.
     entorno = {**os.environ, "PYTHONIOENCODING": "utf-8"}
