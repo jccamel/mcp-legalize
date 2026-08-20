@@ -193,7 +193,10 @@ def test_check_updates_flags_an_index_audited_with_other_rules(
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
-    monkeypatch.setattr(check_updates, "_git_head", lambda _: "abc1234")
+    # El helper vive en el modulo compartido desde que las dos copias de la
+    # consulta a git se unificaron; monkeypatch lo restaura al salir.
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit",
+                        lambda _: "abc1234")
 
     with pytest.raises(SystemExit) as salida:
         check_updates.main()
@@ -225,7 +228,10 @@ def test_check_updates_stays_quiet_when_the_rules_match(
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
-    monkeypatch.setattr(check_updates, "_git_head", lambda _: "abc1234")
+    # El helper vive en el modulo compartido desde que las dos copias de la
+    # consulta a git se unificaron; monkeypatch lo restaura al salir.
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit",
+                        lambda _: "abc1234")
 
     check_updates.main()
 

@@ -13,7 +13,6 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -34,6 +33,7 @@ if str(_PROJECT_DIR) not in sys.path:
 
 import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
 import legalize_injection  # noqa: E402  (idem)
+import legalize_repo  # noqa: E402  (idem)
 
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
@@ -106,17 +106,6 @@ def _self_test() -> int:
           f"real ({n_cuerpo} en cuerpo, {n_meta} en metadatos).")
     print(f"huella del ruleset de cuerpo: {legalize_injection.huella()}")
     return 0
-
-def _git_head_commit(repo_dir: Path) -> str:
-    """Devuelve el hash del commit HEAD del repo git, o '' si no es un repo git."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
-        return ""
 
 def _warn(msg: str) -> None:
     print(f"  [AVISO] {msg}", file=sys.stderr)
@@ -525,9 +514,14 @@ def main() -> None:
     # dos fuentes de verdad sobre el mismo hecho.
     meta_idx.pop("security_warnings_acknowledged", None)
 
-    commit = _git_head_commit(repo_dir)
+    commit = legalize_repo.head_commit(repo_dir)
     if commit:
         meta_idx["git_commit"] = commit
+    else:
+        # Un corpus que no es su propio repositorio no tiene commit que lo
+        # identifique. Conservar el anterior seria sellar el indice con el HEAD
+        # de otro repositorio, que es justo lo que hacia antes.
+        meta_idx.pop("git_commit", None)
 
     print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
     try:
