@@ -22,7 +22,6 @@ ficheros que no cambiaron en disco.
 """
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -37,17 +36,7 @@ if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
 
 import legalize_injection  # noqa: E402  (requiere el sys.path de arriba)
-
-
-def _git_head(repo_dir: Path) -> str:
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return r.stdout.strip() if r.returncode == 0 else ""
-    except Exception:
-        return ""
+import legalize_repo  # noqa: E402  (idem)
 
 
 def main() -> None:
@@ -90,17 +79,6 @@ def main() -> None:
             print(f"{label} SIN REPO  — {repo_dir} no existe")
             continue
 
-        current_commit = _git_head(repo_dir)
-
-        if not current_commit:
-            print(f"{label} SIN GIT   — {repo_dir} no es un repositorio git o está vacío")
-            continue
-
-        if not indexed_commit:
-            print(f"{label} SIN LOCK  — el índice no tiene commit registrado, regenera con --force-all")
-            outdated.append(pais)
-            continue
-
         # El ruleset es ortogonal al commit: un indice puede estar al dia en
         # disco y llevar una auditoria hecha con reglas ya retiradas.
         huella_indice = (meta.get("seguridad") or {}).get("patrones", "")
@@ -116,6 +94,18 @@ def main() -> None:
                 f"\n           → python scripts/update_index.py --repo {dir_base}"
             )
             outdated.append(pais)
+
+        current_commit = legalize_repo.head_commit(repo_dir)
+
+        if not current_commit:
+            print(f"{label} SIN GIT   — {repo_dir} no es la raíz de un "
+                  f"repositorio git, o no tiene commits")
+            continue
+
+        if not indexed_commit:
+            print(f"{label} SIN LOCK  — el índice no tiene commit registrado, regenera con --force-all")
+            outdated.append(pais)
+            continue
 
         if current_commit == indexed_commit:
             print(f"{label} OK        — índice al día ({current_commit[:7]})")

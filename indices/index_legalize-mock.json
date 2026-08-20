@@ -1,13 +1,12 @@
 {
   "_meta": {
-    "generado_en": "2026-08-20T13:18:43",
+    "generado_en": "2026-08-20T13:26:57",
     "total_documentos": 1,
     "directorio_base": "repos/legalize-mock",
     "pais_predeterminado": "mock",
     "version": "2.0.0",
-    "git_commit": "6c6a3205ff81416c84aa318b185627ccdb162023",
     "seguridad": {
-      "escaneado_en": "2026-08-20T13:18:43",
+      "escaneado_en": "2026-08-20T13:26:57",
       "patrones": "03446b5a64e4",
       "cuarentena": {},
       "forzados": {},
