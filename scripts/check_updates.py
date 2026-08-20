@@ -30,8 +30,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 _INDICES_DIR = _PROJECT_DIR / "indices"
 _REPOS_DIR   = _PROJECT_DIR / "repos"
 
-# Igual que en update_index.py: este script corre como `python scripts/...`, asi
-# que sys.path arranca en scripts/ y la raiz del proyecto no es importable.
+# Igual que en update_index.py: este script corre como `python scripts/...`, así
+# que sys.path arranca en scripts/ y la raíz del proyecto no es importable.
 if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
 
@@ -41,9 +41,9 @@ import legalize_repo  # noqa: E402  (idem)
 
 def main() -> None:
     # La consola de Windows usa cp1252 por defecto, que no sabe codificar la
-    # flecha de las sugerencias, asi que el script reventaba con
-    # UnicodeEncodeError justo cuando tenia algo que decir: al reportar un
-    # indice desactualizado. Con errors="replace" se degrada el caracter en
+    # flecha de las sugerencias, así que el script reventaba con
+    # UnicodeEncodeError justo cuando tenía algo que decir: al reportar un
+    # índice desactualizado. Con errors="replace" se degrada el carácter en
     # vez de perderse el informe entero.
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -79,8 +79,8 @@ def main() -> None:
             print(f"{label} SIN REPO  — {repo_dir} no existe")
             continue
 
-        # El ruleset es ortogonal al commit: un indice puede estar al dia en
-        # disco y llevar una auditoria hecha con reglas ya retiradas.
+        # El ruleset es ortogonal al commit: un índice puede estar al día en
+        # disco y llevar una auditoría hecha con reglas ya retiradas.
         huella_indice = (meta.get("seguridad") or {}).get("patrones", "")
         if huella_indice != huella_actual:
             if huella_indice:

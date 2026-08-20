@@ -40,17 +40,17 @@ _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct"
 
 # --- Escaneo de prompt injection ---
 #
-# El vocabulario vive en legalize_injection: un solo sitio declara que texto
-# parece una inyeccion, y cada superficie decide que hacer al encontrarlo. Aqui
-# la decision es cuarentena (BLOCK) o aviso (WARN); en el servidor es sustituir
-# el metadato por "[filtered]". Antes habia dos tablas independientes, y la de
-# los metadatos se habia quedado en EN/ES mientras esta crecia a seis idiomas:
-# el titulo de una ley podia decir "Ignoriere alle vorherigen Anweisungen" y
-# llegar intacto al modelo en cada resultado de busqueda.
+# El vocabulario vive en legalize_injection: un solo sitio declara qué texto
+# parece una inyección, y cada superficie decide qué hacer al encontrarlo. Aquí
+# la decisión es cuarentena (BLOCK) o aviso (WARN); en el servidor es sustituir
+# el metadato por "[filtered]". Antes había dos tablas independientes, y la de
+# los metadatos se había quedado en EN/ES mientras esta crecía a seis idiomas:
+# el título de una ley podía decir "Ignoriere alle vorherigen Anweisungen" y
+# llegar intacto al modelo en cada resultado de búsqueda.
 #
 # Sigue siendo un canario, NO una defensa: la defensa real es _wrap_untrusted
 # (mcp_legalize.py). Lo que se gana al compartir la tabla es que el canario no
-# cante en un idioma distinto segun por donde entre el texto.
+# cante en un idioma distinto según por dónde entre el texto.
 
 SEVERITY_BLOCK = legalize_injection.SEVERITY_BLOCK
 SEVERITY_WARN = legalize_injection.SEVERITY_WARN
@@ -71,25 +71,25 @@ def _strip_frontmatter_for_scan(text: str) -> str:
 def _check_injection(text: str) -> list[_Finding]:
     """Escanea el cuerpo del fichero en busca de patrones de prompt injection.
 
-    Devuelve la lista de hallazgos (puede estar vacia). No imprime nada: quien
-    llama decide que reportar y que bloquear segun la severidad.
+    Devuelve la lista de hallazgos (puede estar vacía). No imprime nada: quien
+    llama decide qué reportar y qué bloquear según la severidad.
 
-    El escaneo cubre el documento COMPLETO, sin techo de tamano: obtener_articulo
-    (mcp_legalize.py) puede extraer texto desde cualquier posicion del fichero,
-    asi que truncar el escaneo abriria un hueco en las normas largas.
+    El escaneo cubre el documento COMPLETO, sin techo de tamaño: obtener_articulo
+    (mcp_legalize.py) puede extraer texto desde cualquier posición del fichero,
+    así que truncar el escaneo abriría un hueco en las normas largas.
     """
     return legalize_injection.escanear(
         _strip_frontmatter_for_scan(text), legalize_injection.SURFACE_BODY,
     )
 
 def _self_test() -> int:
-    """Verifica que cada patron detecta su muestra por el camino REAL.
+    """Verifica que cada patrón detecta su muestra por el camino REAL.
 
     Cubre las dos superficies. En el cuerpo el riesgo es el pre-filtro de gates,
-    que es lo que hace viable escanear un corpus de ~1 GB y tambien lo que puede
+    que es lo que hace viable escanear un corpus de ~1 GB y también lo que puede
     dejar un regex mudo sin que nada falle visiblemente. En los metadatos el
-    riesgo equivalente son los flags al fundir todos los patrones en un unico
-    regex de sustitucion. Los dos caminos se prueban de punta a punta.
+    riesgo equivalente son los flags al fundir todos los patrones en un único
+    regex de sustitución. Los dos caminos se prueban de punta a punta.
     """
     fallos = legalize_injection.autotest()
     for fallo in fallos:
@@ -352,8 +352,8 @@ def main() -> None:
     print(f"Ficheros en disco : {len(md_files):,}")
     print(f"Entradas en índice: {len(documentos):,}")
 
-    # Una pasada incremental solo escanea lo que cambió en disco, asi que si el
-    # ruleset cambia los documentos intactos conservan una auditoria hecha con
+    # Una pasada incremental solo escanea lo que cambió en disco, así que si el
+    # ruleset cambia los documentos intactos conservan una auditoría hecha con
     # reglas que ya no existen — y `escaneado_en` se refresca igual, con lo que
     # la fecha pasa a mentir. Cuando la huella no coincide se reescanea todo.
     huella_actual = legalize_injection.huella()
@@ -519,8 +519,8 @@ def main() -> None:
         meta_idx["git_commit"] = commit
     else:
         # Un corpus que no es su propio repositorio no tiene commit que lo
-        # identifique. Conservar el anterior seria sellar el indice con el HEAD
-        # de otro repositorio, que es justo lo que hacia antes.
+        # identifique. Conservar el anterior sería sellar el índice con el HEAD
+        # de otro repositorio, que es justo lo que hacía antes.
         meta_idx.pop("git_commit", None)
 
     print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
