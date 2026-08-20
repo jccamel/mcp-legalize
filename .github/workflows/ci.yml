@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Linux is not incidental. The symlink-escape test is the only cover for
+    # `Path.resolve()` following a link out of the corpus, and it skips itself
+    # wherever the platform refuses to create symlinks -- which on Windows means
+    # everywhere without Developer Mode. This project was developed on Windows,
+    # so that test had never run anywhere before this workflow existed.
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        # -rs reports the reason for every skip in the log. A skip that nobody
+        # reads is how the symlink gap survived: the suite was green and the
+        # coverage was assumed. The guard step below turns the important ones
+        # into failures, but the full list stays visible here.
+        run: python -m pytest -rs
+
+      - name: Assert the symlink-escape test actually ran
+        # A silently skipped test reads as coverage while providing none, so
+        # `pytest` passing is not enough on its own. This test is the only cover
+        # for a path-escape defense; if the environment ever stops running it,
+        # CI must fail rather than report a green suite.
+        # `-o addopts=` clears the `-q` that pytest.ini sets; without it the
+        # per-test PASSED line this guard greps for is never printed.
+        run: |
+          python -m pytest \
+            tests/test_resolve_ruta.py::test_rejects_symlink_escaping_the_root \
+            -o addopts= --no-header -v | tee symlink.txt
+          if ! grep -q 'test_rejects_symlink_escaping_the_root PASSED' symlink.txt; then
+            echo "::error::The symlink-escape test did not run. It is the only cover for Path.resolve() following a link out of the corpus."
+            exit 1
+          fi
+
+      - name: Assert only the Windows-only tests are skipped
+        # Asserting the exact skip count beats deselecting tests by name: a new
+        # platform-conditional skip fails here and forces a decision, instead of
+        # quietly joining the ignored pile. On Linux exactly two tests skip --
+        # `test_rejects_windows_absolute_path` and
+        # `test_posix_absolute_path_is_not_absolute_on_windows`, both guarded by
+        # `skipif(sys.platform != "win32")`.
+        run: |
+          python -m pytest -rs --no-header -q | tee full.txt
+          skipped=$(grep -cE '^SKIPPED' full.txt || true)
+          if [ "$skipped" -ne 2 ]; then
+            echo "::error::Expected exactly 2 Windows-only skips on Linux, found $skipped. Review the skip list above."
+            grep -E '^SKIPPED' full.txt || echo "(no skips reported)"
+            exit 1
+          fi
+
+      - name: Verify injection patterns detect their samples
+        # `--self-test` asserts each of the 21 injection patterns still matches
+        # its own sample through the literal pre-filter. The pre-filter is a
+        # performance gate in front of the regexes, so a bad edit there can
+        # silence a pattern without breaking anything visibly.
+        run: python scripts/update_index.py --self-test
