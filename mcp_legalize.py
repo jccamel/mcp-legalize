@@ -25,6 +25,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 import legalize_frontmatter
+import legalize_injection
 
 # Logger de seguridad aislado.
 # - Escribe SIEMPRE a stderr (stdout está reservado para el protocolo MCP JSON-RPC).
@@ -287,19 +288,14 @@ def _sanitize_attr(value: str) -> str:
     # Limitar longitud para evitar abuso
     return cleaned[:200]
 
-# Secuencias peligrosas en metadatos legibles (título, rango, etc.): permitimos
-# puntuación y acentos pero neutralizamos marcadores HTML/tag y frases típicas
-# de prompt injection que pudieran colarse en un título.
-_METADATA_DANGEROUS_RE = re.compile(
-    r"<\s*/?\s*[a-zA-Z]|"               # apertura/cierre de tag HTML
-    r"</\s*untrusted_content|"          # cierre explícito del wrap
-    r"<!--|-->|"                         # comentarios HTML
-    r"\bSYSTEM\s*:|\bASSISTANT\s*:|"    # prefijos de rol
-    r"ignore\s+(all\s+)?previous|"
-    r"disregard\s+(all\s+)?(prior|previous)",
-    re.IGNORECASE,
-)
-
+# El vocabulario de inyección ya no vive aquí: lo declara legalize_injection y
+# lo comparte con el escáner del indexador. Antes esto era un regex propio de
+# siete alternativas EN/ES mientras el cuerpo tenía 21 patrones en seis idiomas,
+# y nada obligaba a que evolucionaran juntos — un título en alemán pasaba entero.
+#
+# De las dos superficies, esta es la más expuesta: `buscar_ley` devuelve título
+# y fuente en CADA resultado, fuera del envoltorio <untrusted_content> que sí
+# protege al cuerpo del documento.
 def _sanitize_metadata(value: str, max_len: int = 500) -> str:
     """Sanitiza campos de metadatos (título, rango, fuente, etc.) devueltos al LLM.
 
@@ -311,8 +307,15 @@ def _sanitize_metadata(value: str, max_len: int = 500) -> str:
         value = str(value)
     # Eliminar caracteres de control
     cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", value)
-    # Neutralizar secuencias peligrosas
-    cleaned = _METADATA_DANGEROUS_RE.sub("[filtered]", cleaned)
+    # Los invisibles se quitan siempre: por definición no cambian nada de lo que
+    # un humano ve, y son la forma más barata de partir un patrón en dos
+    # (ig<ZWSP>nore all previous). El escáner del cuerpo ya los quitaba.
+    cleaned = legalize_injection.quitar_invisibles(cleaned)
+    # La política de esta superficie vive con el vocabulario: detectar sobre el
+    # texto normalizado, sustituir sobre el original y descartar el valor entero
+    # cuando la normalización es lo único que destapa el patrón. Ver
+    # legalize_injection.filtrar.
+    cleaned = legalize_injection.filtrar(cleaned, legalize_injection.SURFACE_METADATA)
     return cleaned[:max_len]
 
 def _neutralize_delimiter(texto: str) -> str:
