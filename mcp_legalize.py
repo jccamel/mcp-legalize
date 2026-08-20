@@ -99,6 +99,14 @@ class LeyCompleta(BaseModel):
     chars_devueltos: Optional[int] = None
 
 class ArticuloResultado(BaseModel):
+    """El artículo pedido, o la ley donde no se encontró.
+
+    `error` NO significa «la llamada falló»: para eso está ErrorRespuesta, que
+    es lo que devuelven todas las herramientas cuando no hay nada que entregar.
+    Aquí solo se rellena en el único caso que no es ni éxito ni fallo — la ley
+    se encontró y el artículo no — y entonces `id`, `pais` y `titulo` describen
+    la ley sobre la que se buscó.
+    """
     id: str
     pais: str
     titulo: str
@@ -469,9 +477,17 @@ def _iter_docs(pais: str = ""):
                 yield pais_code, doc_id, doc
 
 def _resolve_ley(id_ley: str, pais: str = ""):
-    """Resuelve un id (exacto o parcial) a (pais_code, doc_id, doc_dict).
+    """Resuelve un id (exacto o parcial) a (pais_code, doc_id, doc_dict, None).
 
-    Devuelve (None, None, None, error_msg) en caso de no encontrarse o ambigüedad.
+    En caso de no encontrarse o de ambigüedad devuelve
+    (None, None, None, ErrorRespuesta) — el error ya construido, no un texto que
+    cada llamador tenga que envolver a su manera.
+
+    Las coincidencias de una ambigüedad van en `sugerencias`, que es el campo
+    que existe para eso. Antes se formateaban dentro del mensaje como un repr de
+    lista de Python, así que un cliente que quisiera ofrecerlas tenía que volver
+    a parsear la prosa. Y son IDs del corpus, es decir texto no confiable: pasan
+    por _sanitize_metadata igual que cualquier otro metadato que llega al LLM.
     """
     id_norm = id_ley.strip().upper().replace(".MD", "")
     paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
@@ -486,9 +502,14 @@ def _resolve_ley(id_ley: str, pais: str = ""):
             k, v = matches[0]
             return pais_code, k, v, None
         if len(matches) > 1 and len(paises_a_buscar) == 1:
-            return None, None, None, f"ID ambiguo. Coincidencias: {[m[0] for m in matches[:10]]}"
+            return None, None, None, ErrorRespuesta(
+                error="ID ambiguo: coincide con más de una ley.",
+                sugerencias=[_sanitize_metadata(m[0], max_len=200) for m in matches[:10]],
+            )
 
-    return None, None, None, f"Ley no encontrada: {id_ley}"
+    return None, None, None, ErrorRespuesta(
+        error=f"Ley no encontrada: {_sanitize_metadata(id_norm, max_len=100)}"
+    )
 
 
 
@@ -506,6 +527,14 @@ Herramientas disponibles:
 - obtener_articulo: extrae el texto de un artículo específico de una ley.
 - listar_rangos: rangos (tipos de norma) disponibles con conteos.
 - estadisticas: información general del dataset.
+
+Errores: cuando una herramienta no puede devolver nada, responde con
+ErrorRespuesta {error, sugerencias?}. `sugerencias` viene rellena cuando hay
+alternativas concretas — un id ambiguo devuelve ahí las leyes que coinciden.
+
+La única excepción es obtener_articulo: si la ley existe pero el artículo no,
+devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
+la ley, para no tener que buscarla otra vez.
 """,
 )
 
@@ -595,7 +624,7 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
 
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
     if err:
-        return ErrorRespuesta(error=err)
+        return err
 
     resumen = _doc_resumen(found_id, found_doc, found_pais)
     resultado = LeyCompleta(**resumen.model_dump())
@@ -624,13 +653,30 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     return resultado
 
 @mcp.tool()
-def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars: int = MAX_CONTENT_CHARS) -> ArticuloResultado:
+def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars: int = MAX_CONTENT_CHARS) -> ArticuloResultado | ErrorRespuesta:
+    """Extrae un artículo concreto de una ley.
+
+    Dos formas de respuesta, y la diferencia entre ellas es deliberada:
+
+    - ErrorRespuesta      no se pudo hacer nada. Sin índices, o la ley no existe
+                          o es ambigua. Es la misma forma que devuelven las otras
+                          cinco herramientas.
+    - ArticuloResultado   con `error` relleno: la ley SÍ se encontró y el
+                          artículo no. Eso no es un fallo sin más — `id`, `pais`
+                          y `titulo` son información real, y perderla obligaría
+                          al cliente a repetir la búsqueda para saber sobre qué
+                          ley falló.
+
+    Antes los tres casos volvían anidados, así que el cliente tenía que
+    inspeccionar un campo opcional para saber si había fallado algo, mientras
+    que con las otras cinco herramientas le bastaba el tipo.
+    """
     if not _DOCS_POR_PAIS:
-        return ArticuloResultado(id="", pais="", titulo="", articulo_buscado=articulo, error="No hay índices disponibles.")
+        return ErrorRespuesta(error="No hay índices disponibles.")
 
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
     if err:
-        return ArticuloResultado(id=id_ley.strip().upper().replace(".MD", ""), pais=pais, titulo="", articulo_buscado=articulo, error=err)
+        return err
 
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
@@ -664,7 +710,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
-    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No índices disponibles")
+    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
     if pais and pais not in _DOCS_POR_PAIS: return ErrorRespuesta(error=f"País '{pais}' desconocido")
     conteo = {}
     for _, _, doc in _iter_docs(pais):
@@ -674,7 +720,7 @@ def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
 
 @mcp.tool()
 def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
-    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No índices disponibles")
+    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
     estados, rangos, annos, total_bytes, paises_res = {}, {}, {}, 0, set()
     for p_code, _, doc in _iter_docs(pais):
         paises_res.add(p_code)
