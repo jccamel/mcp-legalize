@@ -8,10 +8,15 @@ consolidada en el ecosistema "Legalize".
 Permite consultar cualquier país siempre que esté clonado su
 repositorio bajo el estándar SPEC.md e indexado.
 
-Configuración (fichero .env o variables de entorno):
+Configuración (variables de entorno):
   LEGALIZE_INDICES_DIR       — directorio con los índices .json (default: <script_dir>/indices)
-  LEGALIZE_DEFAULT_LIMIT     — resultados por defecto en búsquedas (default: 20)
-  LEGALIZE_MAX_CONTENT_CHARS — límite de caracteres al leer ley completa (default: 80000)
+  LEGALIZE_DEFAULT_LIMIT     — resultados que devuelve `buscar_ley` cuando no se
+                               indica `limite` (default: 20)
+  LEGALIZE_MAX_LIMIT         — techo de `limite` (default: 100). Es un tope real:
+                               una petición mayor se recorta sin avisar.
+  LEGALIZE_MAX_CONTENT_CHARS — valor por defecto de `max_chars` y `contexto_chars`
+                               (default: 80000). NO es un tope: quien llama puede
+                               pedir más y se le devuelve.
 """
 
 import json
