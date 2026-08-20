@@ -11,8 +11,10 @@ the developer happens to have cloned under `repos/`.
 
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +41,10 @@ _update_index = _load_module_from_path(
     "update_index", _PROJECT_ROOT / "scripts" / "update_index.py"
 )
 
+_check_updates = _load_module_from_path(
+    "check_updates", _PROJECT_ROOT / "scripts" / "check_updates.py"
+)
+
 
 @pytest.fixture(scope="session")
 def update_index():
@@ -50,3 +56,38 @@ def update_index():
     work under either mode.
     """
     return _update_index
+
+
+@pytest.fixture(scope="session")
+def check_updates():
+    """The staleness-check script, exposed as a fixture for the same reason."""
+    return _check_updates
+
+
+@pytest.fixture
+def indexer_cli(tmp_path):
+    """Runs the indexer as the CLI it is, in an isolated repo and index.
+
+    The ruleset stamp is decided inside `main()` — reading the previous index,
+    comparing fingerprints, choosing what to rescan — so testing it through the
+    module's helpers would test something other than what runs in production.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    indice = tmp_path / "index.json"
+
+    # El hijo escribe su informe con la codificacion de la consola, que en
+    # Windows es cp1252. Sin forzarla, los acentos llegan aqui como caracteres
+    # de reemplazo y cualquier assert sobre un mensaje real falla por el
+    # transporte y no por el comportamiento.
+    entorno = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+    def correr(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(_PROJECT_ROOT / "scripts" / "update_index.py"),
+             "--repo", str(repo), "--index", str(indice), *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=entorno, timeout=120,
+        )
+
+    return SimpleNamespace(repo=repo, indice=indice, correr=correr)

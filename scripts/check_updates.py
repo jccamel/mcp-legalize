@@ -13,6 +13,12 @@ Salida de ejemplo:
     [SE] DESACTUAL — repo en 9f3a1c2, índice en 82b00c0  →  git pull && python scripts/update_index.py --repo repos/legalize-se
     [AT] SIN GIT   — repos/legalize-at no es un repositorio git
     [PT] VACÍO     — el repositorio no tiene commits
+    [ES] REGLAS    — auditado con 03446b5a64e4, el escáner está en 9f21c0a3e1bb
+
+Comprueba además con qué reglas de escaneo se auditó cada índice. Un índice
+puede estar al día en commits y aun así llevar hallazgos calculados con un
+ruleset que ya no existe, porque una pasada incremental no vuelve a mirar los
+ficheros que no cambiaron en disco.
 """
 
 import json
@@ -24,6 +30,13 @@ _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 _INDICES_DIR = _PROJECT_DIR / "indices"
 _REPOS_DIR   = _PROJECT_DIR / "repos"
+
+# Igual que en update_index.py: este script corre como `python scripts/...`, asi
+# que sys.path arranca en scripts/ y la raiz del proyecto no es importable.
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
+
+import legalize_injection  # noqa: E402  (requiere el sys.path de arriba)
 
 
 def _git_head(repo_dir: Path) -> str:
@@ -38,11 +51,22 @@ def _git_head(repo_dir: Path) -> str:
 
 
 def main() -> None:
+    # La consola de Windows usa cp1252 por defecto, que no sabe codificar la
+    # flecha de las sugerencias, asi que el script reventaba con
+    # UnicodeEncodeError justo cuando tenia algo que decir: al reportar un
+    # indice desactualizado. Con errors="replace" se degrada el caracter en
+    # vez de perderse el informe entero.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
     if not _INDICES_DIR.exists():
         print(f"[ERROR] No se encuentra el directorio de índices: {_INDICES_DIR}", file=sys.stderr)
         sys.exit(1)
 
     outdated = []
+    huella_actual = legalize_injection.huella()
 
     for index_path in sorted(_INDICES_DIR.glob("index_*.json")):
         try:
@@ -77,6 +101,22 @@ def main() -> None:
             outdated.append(pais)
             continue
 
+        # El ruleset es ortogonal al commit: un indice puede estar al dia en
+        # disco y llevar una auditoria hecha con reglas ya retiradas.
+        huella_indice = (meta.get("seguridad") or {}).get("patrones", "")
+        if huella_indice != huella_actual:
+            if huella_indice:
+                motivo = (f"auditado con {huella_indice}, "
+                          f"el escáner está en {huella_actual}")
+            else:
+                motivo = (f"no registra con qué reglas se auditó; "
+                          f"el escáner está en {huella_actual}")
+            print(
+                f"{label} REGLAS    — {motivo}"
+                f"\n           → python scripts/update_index.py --repo {dir_base}"
+            )
+            outdated.append(pais)
+
         if current_commit == indexed_commit:
             print(f"{label} OK        — índice al día ({current_commit[:7]})")
         else:
@@ -88,7 +128,9 @@ def main() -> None:
             outdated.append(pais)
 
     if outdated:
-        print(f"\n{len(outdated)} repo(s) desactualizados: {', '.join(outdated)}")
+        # Un mismo repo puede entrar por reglas y por commit; se cuenta una vez.
+        unicos = list(dict.fromkeys(outdated))
+        print(f"\n{len(unicos)} repo(s) desactualizados: {', '.join(unicos)}")
         sys.exit(1)
     else:
         print("\nTodos los índices están al día.")
