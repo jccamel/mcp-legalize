@@ -84,8 +84,11 @@ jobs:
           fi
 
       - name: Verify injection patterns detect their samples
-        # `--self-test` asserts each of the 21 injection patterns still matches
-        # its own sample through the literal pre-filter. The pre-filter is a
-        # performance gate in front of the regexes, so a bad edit there can
-        # silence a pattern without breaking anything visibly.
+        # `--self-test` asserts every injection pattern still matches its own
+        # sample through the path its surface actually uses. Both paths can
+        # silence a pattern without breaking anything visibly: on the body it is
+        # the literal pre-filter that runs in front of the regexes, and on the
+        # metadata it is the per-pattern flags, which have to survive being fused
+        # into the single substitution regex the server applies to every title
+        # and source it returns.
         run: python scripts/update_index.py --self-test
