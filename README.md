@@ -66,7 +66,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-*(Optional)* You can configure paths and limits via environment variables — see the top of `mcp_legalize.py` for the available options (`LEGALIZE_INDICES_DIR`, `LEGALIZE_DEFAULT_LIMIT`, `LEGALIZE_MAX_CONTENT_CHARS`).
+*(Optional)* All configuration is environment variables — there is no config file:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LEGALIZE_INDICES_DIR` | `<script_dir>/indices` | Where the `index_*.json` files are read from |
+| `LEGALIZE_DEFAULT_LIMIT` | `20` | Results `buscar_ley` returns when `limite` is not given |
+| `LEGALIZE_MAX_LIMIT` | `100` | Hard cap on `limite` — a larger request is silently clamped |
+| `LEGALIZE_MAX_CONTENT_CHARS` | `80000` | Default for `max_chars` and `contexto_chars`. Not a cap: a caller may ask for more |
 
 ---
 
