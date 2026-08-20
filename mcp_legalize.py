@@ -364,6 +364,30 @@ def _wrap_untrusted(texto: str, doc: dict, pais: str) -> str:
         f"</untrusted_content>"
     )
 
+def _bytes_de(doc: dict) -> int:
+    """El tamaño registrado del documento, o 0 si el índice trae basura.
+
+    `.get("_bytes", 0)` defendía de que la clave FALTARA, no de que estuviera
+    con el tipo equivocado, que es lo que trae un índice manipulado. El valor
+    crudo llegaba a dos sitios: al modelo Pydantic de `_doc_resumen`, que lo
+    rechazaba, y a las sumas de `estadisticas` y `listar_paises`, que estallaban.
+    Cuatro de las seis herramientas caían por una sola entrada, y con ellas los
+    documentos sanos que las acompañaban.
+
+    Es la regla que `_read_file` ya fijó para el camino hermano: una ley
+    ilegible degrada a texto vacío, no a un fallo. Un tamaño ilegible degrada
+    a 0. El documento se sirve igual — ocultar una ley porque su metadato de
+    tamaño viene corrupto sería perder el texto, que es lo único que importa.
+
+    `bool` queda fuera a propósito: en Python es un `int`, así que un
+    `isinstance(valor, int)` a secas aceptaría `True` y lo contaría como 1 byte.
+    Eso no es un fallo ruidoso sino una cifra falsa, que es peor.
+    """
+    valor = doc.get("_bytes", 0)
+    if isinstance(valor, bool) or not isinstance(valor, int):
+        return 0
+    return valor
+
 def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
     return DocumentoResumen(
         id=_sanitize_metadata(doc_id, max_len=200),
@@ -374,7 +398,7 @@ def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
         fecha_publicacion=_sanitize_metadata(doc.get("fecha_publicacion", ""), max_len=50),
         ultima_actualizacion=_sanitize_metadata(doc.get("ultima_actualizacion", ""), max_len=50),
         fuente=_sanitize_metadata(doc.get("fuente", ""), max_len=500),
-        bytes=doc.get("_bytes", 0),
+        bytes=_bytes_de(doc),
     )
 
 # Caracteres prohibidos en una ruta del índice. Ninguna ruta legítima los
@@ -551,7 +575,7 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
 
     resultado = []
     for pais_code, docs in _DOCS_POR_PAIS.items():
-        total_bytes = sum(d.get("_bytes", 0) for d in docs.values())
+        total_bytes = sum(_bytes_de(d) for d in docs.values())
         resultado.append(PaisInfo(
             codigo=pais_code,
             nombre=_PAIS_NOMBRE.get(pais_code, pais_code.upper()),
@@ -738,7 +762,7 @@ def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
         if fp and len(fp) >= 4:
             a = fp[:4]
             annos[a] = annos.get(a, 0) + 1
-        total_bytes += doc.get("_bytes", 0)
+        total_bytes += _bytes_de(doc)
 
     return Estadisticas(
         total_documentos=sum(estados.values()),
