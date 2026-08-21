@@ -180,6 +180,11 @@ def test_the_timestamp_still_moves_with_the_stamp(indexer_cli):
         # del indexador. No bloquea — el servidor ya la filtra —, pero queda
         # sellada para que la huella de reglas cubra las dos superficies.
         "metadatos",
+        # `truncados` entró con #21: un corpus que entrega títulos de 100 KB dice
+        # algo de su procedencia, y recortarlos en silencio sería la misma
+        # pérdida callada de datos que este proyecto lleva tres issues negándose
+        # a aceptar.
+        "truncados",
     }
 
 

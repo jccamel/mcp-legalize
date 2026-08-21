@@ -137,6 +137,42 @@ def _needs_update(existing: dict, stat: _StatInfo, force: bool) -> bool:
         return True
     return False
 
+# Techo de longitud para cualquier valor que venga del frontmatter.
+#
+# Medido, no elegido a ojo: el título legítimo más largo del corpus español son
+# 1.658 caracteres (BOE-A-2021-20004) frente a una mediana de 147, y ningún otro
+# campo pasa de 100. 8.000 son casi cinco veces ese máximo real, así que corta un
+# payload de 100 KB sin amenazar a una ley que crezca.
+#
+# Uno solo y no uno por campo a propósito: una tabla por campo sería un segundo
+# juego de números que mantener en sintonía con los `max_len` del servidor, y se
+# quedaría corta en cuanto llegue una jurisdicción con títulos más largos que los
+# españoles.
+_MAX_META_CHARS = 8_000
+
+def _truncar_metadatos(entry: dict) -> list[str]:
+    """Acota los valores del frontmatter y devuelve los campos recortados.
+
+    El indexador guardaba lo que trajera el fichero. El servidor acota al
+    servir, no al cargar, así que un título de 100.000 caracteres vivía entero
+    en el índice y en la memoria de todo servidor que lo leyera: mil documentos
+    así son ~100 MB residentes permanentes mientras las respuestas se ven
+    perfectamente normales.
+
+    Recortar no es rechazar: el documento se indexa igual. Y se informa, porque
+    acortar un título en silencio es la misma pérdida callada de datos que
+    cerró #20 — quien genera el índice debe poder distinguir un corpus hostil
+    de uno inusualmente verboso.
+    """
+    truncados = []
+    for campo, valor in entry.items():
+        if campo.startswith("_") or not isinstance(valor, str):
+            continue
+        if len(valor) > _MAX_META_CHARS:
+            entry[campo] = valor[:_MAX_META_CHARS]
+            truncados.append(campo)
+    return truncados
+
 def _scan_metadatos(entry: dict) -> list[str]:
     """Hallazgos de inyección en los campos que se indexan y luego se sirven.
 
@@ -169,7 +205,8 @@ def _scan_metadatos(entry: dict) -> list[str]:
 def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding]]:
     """Construye una entrada de índice para un documento .md.
 
-    Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos)
+    Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos,
+    campos_truncados)
     """
     text = md_path.read_text(encoding="utf-8", errors="replace")
     hallazgos = _check_injection(text)
@@ -219,7 +256,10 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         val = _get(*keys)
         if val:
             entry[field] = val
-    return doc_id, entry, hallazgos, _scan_metadatos(entry)
+    # Truncar antes de escanear: el escaneo cuesta en proporción al texto y no
+    # tiene sentido pagarlo sobre una franja que no va a entrar en el índice.
+    truncados = _truncar_metadatos(entry)
+    return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -441,6 +481,8 @@ def main() -> None:
     # Hallazgos de inyección en los campos del frontmatter que se indexan. Nunca
     # bloquean — ver `_scan_metadatos` —, solo se registran.
     metadatos: dict[str, list[str]] = {}
+    # Ficheros con algún valor de frontmatter por encima de `_MAX_META_CHARS`.
+    truncados: dict[str, list[str]] = {}
 
     pendientes = nuevos + actualizados
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
@@ -449,7 +491,7 @@ def main() -> None:
         md_path = md_files[rel]
         progreso.avanzar(md_stats[rel].size)
         try:
-            doc_id, entry, hallazgos, hallazgos_meta = _build_entry(
+            doc_id, entry, hallazgos, hallazgos_meta, campos_truncados = _build_entry(
                 md_path, md_stats[rel], repo_dir, fallback_pais)
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
@@ -458,6 +500,8 @@ def main() -> None:
 
         if hallazgos_meta:
             metadatos[rel] = hallazgos_meta
+        if campos_truncados:
+            truncados[rel] = campos_truncados
 
         bloqueantes = [h for h in hallazgos if h.severity == SEVERITY_BLOCK]
         informativos = [h for h in hallazgos if h.severity == SEVERITY_WARN]
@@ -510,6 +554,15 @@ def main() -> None:
         documentos[doc_id] = entry
 
     progreso.cerrar()
+
+    if truncados:
+        print(
+            f"\n[AVISO] {len(truncados)} fichero(s) con metadatos por encima de "
+            f"{_MAX_META_CHARS:,} caracteres. Se indexan recortados.",
+            file=sys.stderr,
+        )
+        for fichero in sorted(truncados):
+            print(f"  - {fichero}: {', '.join(truncados[fichero])}", file=sys.stderr)
 
     # Los metadatos no se ponen en cuarentena: el servidor ya los neutraliza al
     # servirlos y descartar la ley costaría el texto, que es lo que importa. Lo
@@ -603,6 +656,9 @@ def main() -> None:
         # La región del frontmatter también queda sellada, así que la huella de
         # reglas de A3 cubre las dos superficies y no solo el cuerpo.
         "metadatos": _fusionar("metadatos", metadatos),
+        # Un corpus que entrega títulos de 100 KB dice algo de su procedencia,
+        # igual que un identificador repetido o un patrón de inyección.
+        "truncados": _fusionar("truncados", truncados),
     }
     # El esquema anterior guardaba esto bajo otra clave; se retira para no dejar
     # dos fuentes de verdad sobre el mismo hecho.
@@ -639,6 +695,9 @@ def main() -> None:
     if seguridad["metadatos"]:
         print(f"Metadatos sospechosos: {len(seguridad['metadatos']):,} "
               f"(indexados; el servidor los filtra al servirlos)")
+    if seguridad["truncados"]:
+        print(f"Metadatos truncados: {len(seguridad['truncados']):,} "
+              f"(por encima de {_MAX_META_CHARS:,} caracteres)")
     if errores:
         print(f"Errores           : {errores:,}")
 
