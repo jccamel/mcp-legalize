@@ -38,11 +38,26 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            requirements.lock
 
       - name: Install dependencies
+        # 3.12 instala desde el lock y las demás desde los rangos, a propósito.
+        # Los dos modos responden preguntas distintas y hacen falta las dos: el
+        # lock prueba que existe un conjunto exacto de versiones con el que la
+        # suite pasa, y los rangos avisan pronto de que una dependencia rompió
+        # algo aguas arriba. Si solo se instalara desde el lock, esa rotura no
+        # aparecería hasta que alguien lo regenerara.
+        #
+        # El lock se generó con 3.12 y no lleva markers de versión, así que
+        # imponerlo en 3.10/3.11/3.13 podría fallar al resolver por una rueda que
+        # no exista para esa versión — un fallo del fichero, no del proyecto.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -r requirements.lock
+          else
+            python -m pip install -r requirements-dev.txt
+          fi
 
       - name: Run test suite
         # -rs reports the reason for every skip in the log. A skip that nobody
