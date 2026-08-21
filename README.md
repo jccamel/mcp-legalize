@@ -92,6 +92,23 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` declares what the project needs and the ranges it tolerates.
+`requirements.lock` records the exact set of versions the test suite passes with,
+transitive dependencies included — install from it when you want the environment
+this was verified against rather than whatever resolves today:
+
+```bash
+pip install -r requirements.lock
+```
+
+Both files are kept because they answer different questions. The ranges say what
+the project supports; the lock says what actually ran. To regenerate the lock
+after changing a dependency:
+
+```bash
+pip install -r requirements-dev.txt && pip freeze > requirements.lock
+```
+
 ## Configuration
 
 All configuration is environment variables. There is no configuration file.
