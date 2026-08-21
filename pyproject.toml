@@ -1,0 +1,23 @@
+# Configuración de herramientas, no metadatos de empaquetado.
+#
+# No hay tabla [project] a propósito. Declarar `name` y `version` haría que el
+# directorio pareciera instalable, y no lo es: esto son cuatro módulos sueltos
+# en la raíz, no un paquete. Con un [project] presente, `pip install -e .` falla
+# al no encontrar nada que construir — un modo de fallo que hoy no existe y que
+# no compensa crear, porque nadie instala esto por nombre: se clona, se instala
+# `requirements.txt` y se apunta el cliente MCP al intérprete del .venv.
+#
+# Por el mismo motivo `requires-python` tampoco vive aquí. El suelo real es
+# 3.10, lo fijan `fastmcp` y `mcp` con su propio `Requires-Python`, y está
+# documentado en el README. Repetirlo en un [project] que no se usa para
+# instalar no lo haría más cierto ni impediría nada.
+#
+# Lo que sí aporta este fichero es un único sitio para la configuración de
+# herramientas, en lugar de un .ini por cada una.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# El `-q` importa más de lo que parece: gana sobre un `-v` de la línea de
+# órdenes, así que los guards del CI que buscan la línea `... PASSED` de un test
+# concreto lo limpian con `-o addopts=`. Ver .github/workflows/ci.yml.
+addopts = "-q --strict-markers"
