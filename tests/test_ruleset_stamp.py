@@ -175,6 +175,11 @@ def test_the_timestamp_still_moves_with_the_stamp(indexer_cli):
         # repositorio de origen, igual que un hallazgo de inyección, así que se
         # sella en el índice en lugar de quedarse en la consola de quien lo generó.
         "duplicados",
+        # `metadatos` entró con #22: hasta entonces el frontmatter era la única
+        # región que se indexaba y se servía sin que nadie la examinara del lado
+        # del indexador. No bloquea — el servidor ya la filtra —, pero queda
+        # sellada para que la huella de reglas cubra las dos superficies.
+        "metadatos",
     }
 
 
