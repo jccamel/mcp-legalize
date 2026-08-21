@@ -169,7 +169,13 @@ def test_the_timestamp_still_moves_with_the_stamp(indexer_cli):
 
     seguridad = leer_seguridad(indexer_cli.indice)
 
-    assert set(seguridad) == {"escaneado_en", "patrones", "cuarentena", "forzados", "avisos"}
+    assert set(seguridad) == {
+        "escaneado_en", "patrones", "cuarentena", "forzados", "avisos",
+        # `duplicados` entró con #20: un identificador repetido dice algo del
+        # repositorio de origen, igual que un hallazgo de inyección, así que se
+        # sella en el índice en lugar de quedarse en la consola de quien lo generó.
+        "duplicados",
+    }
 
 
 # ─────────────────────────── What check_updates reports ──────────────────────
