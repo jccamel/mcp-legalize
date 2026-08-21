@@ -225,11 +225,55 @@ def _load_indices():
             if not isinstance(data, dict):
                 continue
 
-            meta = data.get("_meta", {})
+            # `_meta` se valida igual que `documentos`: si no es un objeto, no
+            # se puede leer campo a campo y el país saldría de un `.get()` sobre
+            # un tipo que no lo tiene. Degradar a {} deja que el nombre del
+            # fichero decida el país, que es el mismo respaldo que ya existía
+            # para un `_meta` sin `pais`.
+            meta = data.get("_meta")
+            if not isinstance(meta, dict):
+                if meta is not None:
+                    print(
+                        f"[AVISO] {index_path.name}: '_meta' no es un objeto; "
+                        f"se ignora y el país se deduce del nombre del fichero.",
+                        file=sys.stderr,
+                    )
+                meta = {}
             pais_code = meta.get("pais_predeterminado") or meta.get("pais") or index_path.stem.replace("index_", "")
 
             if "documentos" in data:
+                # La raíz ya se validaba; lo que se sacaba de ella, no. Un
+                # `documentos` que no fuera un dict llegaba crudo a las
+                # herramientas: cuatro de las seis reventaban con AttributeError
+                # y, con `null`, el valor se guardaba ANTES del `len()` que
+                # fallaba, así que el `except` de abajo registraba el error
+                # sobre un diccionario ya envenenado y el cuerpo del módulo
+                # moría al sumar `_TOTAL_DOCS`. El servidor no arrancaba, y un
+                # índice sano en el mismo directorio se perdía con él.
                 docs = data["documentos"]
+                if not isinstance(docs, dict):
+                    print(
+                        f"[ERROR] {index_path.name}: 'documentos' no es un objeto "
+                        f"({type(docs).__name__}); índice ignorado.",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                # Una entrada malformada cuesta esa entrada y nada más, que es
+                # la regla que ya siguen `_read_file` y `_bytes_de`. Descartar
+                # el fichero entero dejaría que un solo documento corrupto
+                # escondiera un corpus.
+                descartadas = [k for k, v in docs.items() if not isinstance(v, dict)]
+                if descartadas:
+                    docs = {k: v for k, v in docs.items() if isinstance(v, dict)}
+                    print(
+                        f"[AVISO] {index_path.name}: {len(descartadas)} entrada(s) "
+                        f"descartada(s) por no ser objetos: "
+                        f"{', '.join(map(repr, descartadas[:5]))}"
+                        f"{'…' if len(descartadas) > 5 else ''}",
+                        file=sys.stderr,
+                    )
+
                 _DOCS_POR_PAIS[pais_code] = docs
                 _META_POR_PAIS[pais_code] = meta
                 _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
