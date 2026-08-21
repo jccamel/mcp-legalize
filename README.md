@@ -323,6 +323,9 @@ This section documents the security model and the mitigations implemented
 against indirect prompt injection through malicious Markdown in external
 repositories.
 
+To report a vulnerability, see [SECURITY.md](SECURITY.md) — it explains the
+private reporting channel and what falls inside the scope described below.
+
 ### Threat model
 
 **Attack vector.** A compromised or malicious `legalize-*` repository contains
