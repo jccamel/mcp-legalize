@@ -332,9 +332,13 @@ def main() -> None:
         if ruta:
             ruta_a_docid[ruta] = k
 
-    # Escanear Markdown recursivamente
+    # Escanear Markdown recursivamente. Ordenado a propósito: cuando dos
+    # ficheros reclaman el mismo `identificador`, gana el primero, y "el
+    # primero" solo significa algo si el recorrido no depende del orden que
+    # devuelva el sistema de ficheros. Sin esto, el documento superviviente
+    # podía cambiar entre dos corridas sobre el mismo corpus.
     md_files = {}
-    for p in repo_dir.rglob("*.md"):
+    for p in sorted(repo_dir.rglob("*.md")):
         # Evitar repositorios .git internos u ocultos si aplicara
         if ".git" in p.parts:
             continue
@@ -401,6 +405,10 @@ def main() -> None:
     forzados: dict[str, list[str]] = {}
     # Ficheros con hallazgos `warn`: se indexan igual, solo se registran.
     avisos: dict[str, list[str]] = {}
+    # Ficheros cuyo `identificador` ya lo reclamaba otro documento. Se indexan
+    # bajo un id derivado de su ruta, nunca se descartan: perder una ley porque
+    # otra repite su identificador convertiría un fallo del corpus en dos.
+    duplicados: dict[str, str] = {}
 
     pendientes = nuevos + actualizados
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
@@ -447,9 +455,39 @@ def main() -> None:
         old_doc_id = ruta_a_docid.get(rel)
         if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
             del documentos[old_doc_id]
+
+        # El `identificador` sale del frontmatter, que es contenido no fiable, y
+        # es lo único que el corpus decide y que además es una CLAVE. Sin esta
+        # comprobación, dos ficheros que lo repetían colapsaban en una entrada:
+        # el último procesado ganaba y el otro documento desaparecía del corpus
+        # sin que el resumen lo dijera.
+        #
+        # Gana el primero y el segundo se queda con un id derivado de su ruta,
+        # que es única por construcción. Descartarlo sería perder una ley por
+        # culpa de otra; renombrarlas a ambas rompería el id con el que un
+        # cliente vuelve a un documento que hoy resuelve bien.
+        if doc_id in documentos and documentos[doc_id].get("_ruta") != rel:
+            duplicados[rel] = doc_id
+            doc_id = f"{doc_id}__{rel.replace('/', '_').removesuffix('.md')}"
+            entry["identificador"] = doc_id
+
         documentos[doc_id] = entry
 
     progreso.cerrar()
+
+    # Un identificador repetido es un problema de procedencia del corpus, no de
+    # formato, así que se informa fichero a fichero como la cuarentena. El
+    # defecto que cerró #20 fue el silencio: el documento perdido no aparecía
+    # por ningún lado y "6 escaneados, 5 indexados" se imprimía sin comentario.
+    if duplicados:
+        print(
+            f"\n[AVISO] {len(duplicados)} fichero(s) con un identificador que ya "
+            f"reclamaba otro documento. Se indexan con un id derivado de su "
+            f"ruta; el primero conserva el original.",
+            file=sys.stderr,
+        )
+        for fichero in sorted(duplicados):
+            print(f"  - {fichero}: '{duplicados[fichero]}' ya en uso", file=sys.stderr)
 
     # La cuarentena es por fichero, nunca global: un puñado de documentos
     # sospechosos no puede dejar sin índice a los otros doce mil.
@@ -509,6 +547,10 @@ def main() -> None:
         "cuarentena": _fusionar("cuarentena", cuarentena),
         "forzados": _fusionar("forzados", forzados),
         "avisos": _fusionar("avisos", avisos),
+        # Un identificador repetido dice algo del repositorio de origen, igual
+        # que un hallazgo de inyección, así que queda sellado en el índice y no
+        # solo impreso en la consola de quien lo generó.
+        "duplicados": _fusionar("duplicados", {k: [v] for k, v in duplicados.items()}),
     }
     # El esquema anterior guardaba esto bajo otra clave; se retira para no dejar
     # dos fuentes de verdad sobre el mismo hecho.
@@ -539,6 +581,9 @@ def main() -> None:
         print(f"Forzados          : {len(seguridad['forzados']):,} (indexados pese al bloqueo)")
     if seguridad["cuarentena"]:
         print(f"Cuarentena        : {len(seguridad['cuarentena']):,} (excluidos del índice)")
+    if seguridad["duplicados"]:
+        print(f"Identificadores duplicados: {len(seguridad['duplicados']):,} "
+              f"(indexados con un id derivado de su ruta)")
     if errores:
         print(f"Errores           : {errores:,}")
 
