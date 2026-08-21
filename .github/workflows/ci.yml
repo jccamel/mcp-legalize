@@ -71,7 +71,7 @@ jobs:
         # `pytest` passing is not enough on its own. This test is the only cover
         # for a path-escape defense; if the environment ever stops running it,
         # CI must fail rather than report a green suite.
-        # `-o addopts=` clears the `-q` that pytest.ini sets; without it the
+        # `-o addopts=` clears the `-q` set in pyproject.toml; without it the
         # per-test PASSED line this guard greps for is never printed.
         run: |
           python -m pytest \
