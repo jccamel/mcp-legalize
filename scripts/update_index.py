@@ -137,10 +137,39 @@ def _needs_update(existing: dict, stat: _StatInfo, force: bool) -> bool:
         return True
     return False
 
+def _scan_metadatos(entry: dict) -> list[str]:
+    """Hallazgos de inyección en los campos que se indexan y luego se sirven.
+
+    `_check_injection` mira el cuerpo con el frontmatter ya recortado, así que la
+    región que acaba en cada resultado de `buscar_ley` no la examinaba nadie del
+    lado del indexador: el mismo texto iba a cuarentena en el cuerpo y se
+    indexaba sin comentario en un título.
+
+    No bloquea, y eso es una decisión medida, no una omisión. `meta.html_tag`
+    tiene severidad `block` y detecta cualquier `<` seguido de letra, de modo que
+    un título real como "Real Decreto 3/2020 <de desarrollo>" lo dispara. Poner
+    ese documento en cuarentena borraría una ley legítima del corpus para frenar
+    algo que el servidor ya neutraliza al servirlo. Se pierde el texto, que es lo
+    único que importa, a cambio de nada.
+
+    Lo que sí hace falta es constancia: qué fichero, qué campo y qué patrón. Un
+    título hostil dice algo del repositorio de origen, igual que un hallazgo en
+    el cuerpo.
+    """
+    hallazgos = []
+    for campo, valor in entry.items():
+        # Los campos que empiezan por '_' los calcula el indexador, no vienen
+        # del frontmatter: no son texto no fiable.
+        if campo.startswith("_") or not isinstance(valor, str) or not valor:
+            continue
+        for h in legalize_injection.escanear(valor, legalize_injection.SURFACE_METADATA):
+            hallazgos.append(f"{campo}: {h.label}")
+    return hallazgos
+
 def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding]]:
     """Construye una entrada de índice para un documento .md.
 
-    Devuelve (doc_id, entry_dict, hallazgos_de_seguridad)
+    Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos)
     """
     text = md_path.read_text(encoding="utf-8", errors="replace")
     hallazgos = _check_injection(text)
@@ -190,7 +219,7 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         val = _get(*keys)
         if val:
             entry[field] = val
-    return doc_id, entry, hallazgos
+    return doc_id, entry, hallazgos, _scan_metadatos(entry)
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -409,6 +438,9 @@ def main() -> None:
     # bajo un id derivado de su ruta, nunca se descartan: perder una ley porque
     # otra repite su identificador convertiría un fallo del corpus en dos.
     duplicados: dict[str, str] = {}
+    # Hallazgos de inyección en los campos del frontmatter que se indexan. Nunca
+    # bloquean — ver `_scan_metadatos` —, solo se registran.
+    metadatos: dict[str, list[str]] = {}
 
     pendientes = nuevos + actualizados
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
@@ -417,11 +449,15 @@ def main() -> None:
         md_path = md_files[rel]
         progreso.avanzar(md_stats[rel].size)
         try:
-            doc_id, entry, hallazgos = _build_entry(md_path, md_stats[rel], repo_dir, fallback_pais)
+            doc_id, entry, hallazgos, hallazgos_meta = _build_entry(
+                md_path, md_stats[rel], repo_dir, fallback_pais)
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
             errores += 1
             continue
+
+        if hallazgos_meta:
+            metadatos[rel] = hallazgos_meta
 
         bloqueantes = [h for h in hallazgos if h.severity == SEVERITY_BLOCK]
         informativos = [h for h in hallazgos if h.severity == SEVERITY_WARN]
@@ -474,6 +510,19 @@ def main() -> None:
         documentos[doc_id] = entry
 
     progreso.cerrar()
+
+    # Los metadatos no se ponen en cuarentena: el servidor ya los neutraliza al
+    # servirlos y descartar la ley costaría el texto, que es lo que importa. Lo
+    # que faltaba era constancia de que el corpus los trae.
+    if metadatos:
+        print(
+            f"\n[AVISO] {len(metadatos)} fichero(s) con patrones de inyección en "
+            f"metadatos. Se indexan igualmente; el servidor los filtra al "
+            f"servirlos.",
+            file=sys.stderr,
+        )
+        for fichero in sorted(metadatos):
+            print(f"  - {fichero}: {', '.join(metadatos[fichero])}", file=sys.stderr)
 
     # Un identificador repetido es un problema de procedencia del corpus, no de
     # formato, así que se informa fichero a fichero como la cuarentena. El
@@ -551,6 +600,9 @@ def main() -> None:
         # que un hallazgo de inyección, así que queda sellado en el índice y no
         # solo impreso en la consola de quien lo generó.
         "duplicados": _fusionar("duplicados", {k: [v] for k, v in duplicados.items()}),
+        # La región del frontmatter también queda sellada, así que la huella de
+        # reglas de A3 cubre las dos superficies y no solo el cuerpo.
+        "metadatos": _fusionar("metadatos", metadatos),
     }
     # El esquema anterior guardaba esto bajo otra clave; se retira para no dejar
     # dos fuentes de verdad sobre el mismo hecho.
@@ -584,6 +636,9 @@ def main() -> None:
     if seguridad["duplicados"]:
         print(f"Identificadores duplicados: {len(seguridad['duplicados']):,} "
               f"(indexados con un id derivado de su ruta)")
+    if seguridad["metadatos"]:
+        print(f"Metadatos sospechosos: {len(seguridad['metadatos']):,} "
+              f"(indexados; el servidor los filtra al servirlos)")
     if errores:
         print(f"Errores           : {errores:,}")
 
