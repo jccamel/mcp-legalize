@@ -271,6 +271,10 @@ pass through the same sanitizer as everything else returned to the model. See
 
 ## Development
 
+[CONTRIBUTING.md](CONTRIBUTING.md) records the conventions this project is built
+with — how commits and pull requests are shaped, how tests are written, and which
+of them check the documentation itself.
+
 The test suite runs against the mock corpus and needs no cloned repositories.
 
 ```bash
