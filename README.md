@@ -44,6 +44,7 @@ threat model is a compromised corpus, not a compromised client.
 |---|---|
 | Multi-jurisdiction | Any corpus following the Legalize Format Spec |
 | Search | Title text, country, sub-jurisdiction, department, legal rank, status, year, and publication, repeal or last-updated date ranges |
+| Full-text search | `texto` matches terms in the body of the law, in any order, through an inverted index built per corpus |
 | Article extraction | Returns a single article rather than a whole statute |
 | Indexing | Recursive scan of cloned repositories into JSON indices |
 | Mock corpus | A one-document repository ships with the server, so an integration can be tested without cloning gigabytes |
@@ -213,7 +214,13 @@ Absolute paths are required in both clients.
 | `obtener_ley` | Full text and metadata of one law |
 | `obtener_articulo` | A single article, located by number. Recognises Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`) |
 | `listar_rangos` | Available norm types with their frequency |
+| `contar_leyes` | How many laws match, without returning them. Takes the same filters as `buscar_ley` |
 | `estadisticas` | Global metrics of the loaded datasets |
+
+`buscar_ley` truncates at `limite` without saying so, and results are in corpus
+order rather than ranked by relevance — so the first hundred of a thousand are
+arbitrary. `contar_leyes` is how a client tells *"these are the 24 laws"* from
+*"these are 100 of 1,092, in no particular order"*.
 
 ### Error contract
 
