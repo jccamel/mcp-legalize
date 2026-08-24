@@ -43,7 +43,7 @@ threat model is a compromised corpus, not a compromised client.
 | Capability | Detail |
 |---|---|
 | Multi-jurisdiction | Any corpus following the Legalize Format Spec |
-| Search | Title text, country, sub-jurisdiction, legal rank, status, year, date range |
+| Search | Title text, country, sub-jurisdiction, department, legal rank, status, year, and publication, repeal or last-updated date ranges |
 | Article extraction | Returns a single article rather than a whole statute |
 | Indexing | Recursive scan of cloned repositories into JSON indices |
 | Mock corpus | A one-document repository ships with the server, so an integration can be tested without cloning gigabytes |
@@ -209,7 +209,7 @@ Absolute paths are required in both clients.
 | Tool | Returns |
 |---|---|
 | `listar_paises` | Indexed jurisdictions with document counts and corpus size |
-| `buscar_ley` | Laws matching title text, country, sub-jurisdiction, rank, status, year or date range |
+| `buscar_ley` | Laws matching title text, country, sub-jurisdiction, department, rank, status, year, or a publication, repeal or last-updated date range |
 | `obtener_ley` | Full text and metadata of one law |
 | `obtener_articulo` | A single article, located by number. Recognises Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`) |
 | `listar_rangos` | Available norm types with their frequency |
