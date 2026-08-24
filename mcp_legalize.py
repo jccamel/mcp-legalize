@@ -20,6 +20,7 @@ Configuración (variables de entorno):
 """
 
 import json
+import pickle
 import logging
 import os
 import re
@@ -30,6 +31,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 import legalize_frontmatter
+import legalize_tokenizer
 import legalize_injection
 
 # Logger de seguridad aislado.
@@ -192,6 +194,16 @@ def _campo_normalizado(doc: dict, campo: str) -> str:
 _DOCS_POR_PAIS: dict[str, dict[str, dict]] = {}
 _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
+
+# Índices invertidos ya cargados, por país. A diferencia de los otros tres, este
+# NO se llena al arrancar: son ~85 MB por corpus español y ~15 MB por el sueco,
+# y un despliegue cuyos clientes nunca busquen por texto no tiene por qué
+# pagarlos. Es la misma decisión que se tomó para la caché de normalización,
+# con bastante más en juego.
+#
+# El valor `None` significa "se intentó cargar y no se pudo", para no reintentar
+# abrir un fichero que no está en cada consulta.
+_INVERTIDO_POR_PAIS: dict[str, dict | None] = {}
 
 
 _PAIS_NOMBRE = {
@@ -567,6 +579,66 @@ def _strip_frontmatter(content: str) -> str:
     """
     return legalize_frontmatter.cuerpo(content)
 
+def _cargar_invertido(pais: str) -> dict | None:
+    """Carga el índice invertido de un país la primera vez que hace falta.
+
+    Devuelve None si no hay fichero o no se puede leer. No es un error: un
+    corpus indexado antes de que esto existiera, o cuyo `.bin` no se pudo
+    escribir, simplemente no puede responder a una búsqueda por texto. Devolver
+    un error rompería la herramienta para todos los países por culpa de uno,
+    que es lo contrario de la regla que sigue el resto del servidor.
+    """
+    nombre = _INDEX_FILE_POR_PAIS.get(pais, "")
+    if not nombre:
+        return None
+    ruta = INDICES_DIR / f"inverted_{nombre.removeprefix('index_')}.bin"
+    try:
+        with ruta.open("rb") as fh:
+            datos = pickle.load(fh)
+    except Exception as exc:
+        # El `.bin` es entrada no fiable igual que el JSON: un fichero truncado
+        # o manipulado no puede tumbar la herramienta. Lección de #18.
+        print(f"[AVISO] No se pudo cargar {ruta.name}: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(datos, dict) or not isinstance(datos.get("postings"), dict):
+        print(f"[AVISO] {ruta.name}: formato inesperado; se ignora.", file=sys.stderr)
+        return None
+    return datos
+
+def _invertido(pais: str) -> dict | None:
+    """El índice invertido de un país, cargándolo una sola vez."""
+    if pais not in _INVERTIDO_POR_PAIS:
+        _INVERTIDO_POR_PAIS[pais] = _cargar_invertido(pais)
+    return _INVERTIDO_POR_PAIS[pais]
+
+def _docs_con_texto(pais: str, consulta: str) -> set[str] | None:
+    """Los ids del país que contienen TODOS los términos de la consulta.
+
+    Intersección, no unión: quien busca "arrendamiento urbano" quiere los
+    documentos donde aparecen los dos, no la suma de los que llevan cualquiera
+    de ellos, que sobre este corpus sería casi todo.
+
+    Devuelve None si el país no tiene índice invertido, para que quien llama
+    pueda distinguir "no hay con qué buscar" de "no hay resultados".
+    """
+    invertido = _invertido(pais)
+    if invertido is None:
+        return None
+    postings = invertido["postings"]
+    # Se tokeniza la consulta con las mismas reglas que construyeron el índice.
+    # Si divergieran, buscar "PROTECCIÓN" no encontraría lo que se indexó como
+    # "proteccion" — la clase de discrepancia que A2 cerró para el frontmatter.
+    terminos = legalize_tokenizer.tokens(consulta)
+    if not terminos:
+        return None
+    encontrados = None
+    for termino in terminos:
+        docs = set(postings.get(termino, ()))
+        encontrados = docs if encontrados is None else encontrados & docs
+        if not encontrados:
+            return set()
+    return encontrados
+
 def _iter_docs(pais: str = ""):
     if pais and pais in _DOCS_POR_PAIS:
         for doc_id, doc in _DOCS_POR_PAIS[pais].items():
@@ -664,6 +736,7 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
 @mcp.tool()
 def buscar_ley(
     consulta: str = "",
+    texto: str = "",
     pais: str = "",
     rango: str = "",
     estado: str = "",
@@ -683,6 +756,9 @@ def buscar_ley(
     Busca leyes por múltiples criterios.
 
     - consulta: texto libre contra el título.
+    - texto: términos que deben aparecer en el CUERPO de la ley. Devuelve los
+      documentos que contienen todos ellos, sin importar el orden. Requiere que
+      el corpus tenga índice invertido; si no lo tiene, no devuelve resultados.
     - pais: código ISO (es, se, at, de, fr…).
     - rango: tipo de norma (ley, forordning, Verordnung…).
     - estado: in_force, repealed, partially_repealed, annulled, expired.
@@ -724,10 +800,26 @@ def buscar_ley(
     actualizada_desde_clean = actualizada_desde.strip()
     actualizada_hasta_clean = actualizada_hasta.strip()
 
+    # La intersección de texto va ANTES del bucle y no dentro: es el paso más
+    # barato (0,08 ms) y el más selectivo — puede recortar el 95% de los
+    # candidatos —, así que sustituye a `_iter_docs` como fuente en vez de
+    # sumarse a la cadena de filtros. Medido al diseñar #31.
+    ids_texto = None
+    if texto:
+        paises = [pais] if pais else list(_DOCS_POR_PAIS)
+        ids_texto = set()
+        for codigo in paises:
+            encontrados = _docs_con_texto(codigo, texto)
+            if encontrados:
+                ids_texto |= {(codigo, doc_id) for doc_id in encontrados}
+        if not ids_texto:
+            return []
+
     resultados = []
     skipped = 0
 
     for pais_code, doc_id, doc in _iter_docs(pais):
+        if ids_texto is not None and (pais_code, doc_id) not in ids_texto:      continue
         # Los filtros de fecha van delante: comparan cadenas tal cual y
         # descartan sin normalizar nada. Antes el de título corría primero, así
         # que una consulta que un filtro posterior iba a descartar igualmente
