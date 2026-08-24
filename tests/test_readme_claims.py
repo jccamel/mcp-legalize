@@ -48,13 +48,17 @@ def test_the_readme_documents_every_tool():
     assert documentadas == herramientas_registradas()
 
 
-def test_there_are_six_tools():
+def test_there_are_seven_tools():
     """Keeps the test above from passing on an empty set.
 
     It compares a set against itself filtered by the README, so a broken
     introspection would make it vacuously true.
+
+    Was six until #31 added `contar_leyes`. The count is asserted rather than
+    left open on purpose: a new tool on the public surface should require
+    someone to notice, and this failing is that notice.
     """
-    assert len(herramientas_registradas()) == 6
+    assert len(herramientas_registradas()) == 7
 
 
 # The keys `update_index.py` writes under `_meta.seguridad`. Pinned in

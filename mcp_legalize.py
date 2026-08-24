@@ -117,6 +117,16 @@ class ArticuloResultado(BaseModel):
     posicion_caracter: Optional[int] = None
     error: Optional[str] = None
 
+class Conteo(BaseModel):
+    """Cuántos documentos cumplen unos filtros, sin traerlos.
+
+    Existe porque `buscar_ley` trunca en `limite` sin decirlo, y sin ranking los
+    primeros N son arbitrarios: orden del corpus, no relevancia. Un cliente que
+    recibe 100 de 1.092 sin señal de que faltan 992 razona como si hubiera visto
+    la respuesta entera.
+    """
+    total: int
+
 class RangoConteo(BaseModel):
     rango: str
     total: int
@@ -733,6 +743,82 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
         ))
     return resultado
 
+# Filtros de búsqueda, compartidos por `buscar_ley` y `contar_leyes`.
+#
+# Un solo sitio decide qué documentos pasan, por el mismo motivo que hay un solo
+# parser de frontmatter y un solo vocabulario de inyección: dos copias de la
+# misma regla divergen, y aquí divergir significaría que el conteo describe una
+# consulta distinta de la que el cliente está a punto de ejecutar.
+def _filtrar_docs(
+    consulta: str, texto: str, pais: str, rango: str, estado: str, anno: str,
+    jurisdiccion: str, departamento: str, fecha_desde: str, fecha_hasta: str,
+    derogada_desde: str, derogada_hasta: str,
+    actualizada_desde: str, actualizada_hasta: str,
+):
+    """Genera (pais_code, doc_id, doc) para cada documento que pasa los filtros."""
+    q_norm            = _normalize(consulta)     if consulta     else ""
+    rango_norm        = _normalize(rango)        if rango        else ""
+    estado_norm       = _normalize(estado)       if estado       else ""
+    jurisdiccion_norm = _normalize(jurisdiccion) if jurisdiccion else ""
+    departamento_norm = _normalize(departamento) if departamento else ""
+    anno_clean              = anno.strip()
+    fecha_desde_clean       = fecha_desde.strip()
+    fecha_hasta_clean       = fecha_hasta.strip()
+    derogada_desde_clean    = derogada_desde.strip()
+    derogada_hasta_clean    = derogada_hasta.strip()
+    actualizada_desde_clean = actualizada_desde.strip()
+    actualizada_hasta_clean = actualizada_hasta.strip()
+
+    # La intersección de texto va ANTES del bucle y no dentro: es el paso más
+    # barato (0,08 ms) y el más selectivo — puede recortar el 95% de los
+    # candidatos —, así que sustituye a `_iter_docs` como fuente en vez de
+    # sumarse a la cadena de filtros. Medido al diseñar #31.
+    ids_texto = None
+    if texto:
+        paises = [pais] if pais else list(_DOCS_POR_PAIS)
+        ids_texto = set()
+        for codigo in paises:
+            encontrados = _docs_con_texto(codigo, texto)
+            if encontrados:
+                ids_texto |= {(codigo, doc_id) for doc_id in encontrados}
+        if not ids_texto:
+            return
+
+    for pais_code, doc_id, doc in _iter_docs(pais):
+        if ids_texto is not None and (pais_code, doc_id) not in ids_texto:      continue
+        # Los filtros de fecha van delante: comparan cadenas tal cual y
+        # descartan sin normalizar nada. Antes el de título corría primero, así
+        # que una consulta que un filtro posterior iba a descartar igualmente
+        # pagaba el título entero — 859 ms de más sobre el corpus español.
+        fp = doc.get("fecha_publicacion", "")
+        if anno_clean        and not fp.startswith(anno_clean):                                     continue
+        if fecha_desde_clean and fp and fp < fecha_desde_clean:                                     continue
+        if fecha_hasta_clean and fp and fp > fecha_hasta_clean:                                     continue
+
+        # Derogación y última actualización, a diferencia de la publicación,
+        # exigen que el campo EXISTA. `fecha_derogacion` está vacía en 10.367 de
+        # los 12.291 documentos españoles, así que tratar el vacío como "pasa el
+        # filtro" haría que "derogadas antes de 2020" devolviera también todas
+        # las que siguen vigentes — la respuesta contraria a la pregunta.
+        if derogada_desde_clean or derogada_hasta_clean:
+            fd = doc.get("fecha_derogacion", "")
+            if not fd:                                                                              continue
+            if derogada_desde_clean and fd < derogada_desde_clean:                                  continue
+            if derogada_hasta_clean and fd > derogada_hasta_clean:                                  continue
+        if actualizada_desde_clean or actualizada_hasta_clean:
+            fa = doc.get("ultima_actualizacion", "")
+            if not fa:                                                                              continue
+            if actualizada_desde_clean and fa < actualizada_desde_clean:                            continue
+            if actualizada_hasta_clean and fa > actualizada_hasta_clean:                            continue
+
+        if estado_norm       and estado_norm       not in _campo_normalizado(doc, "estado"):        continue
+        if rango_norm        and rango_norm        not in _campo_normalizado(doc, "rango"):         continue
+        if jurisdiccion_norm and jurisdiccion_norm not in _campo_normalizado(doc, "jurisdiccion"):  continue
+        if departamento_norm and departamento_norm not in _campo_normalizado(doc, "departamento"):  continue
+        if q_norm            and q_norm            not in _campo_normalizado(doc, "titulo"):        continue
+
+        yield pais_code, doc_id, doc
+
 @mcp.tool()
 def buscar_ley(
     consulta: str = "",
@@ -787,79 +873,67 @@ def buscar_ley(
         return ErrorRespuesta(error=f"País '{pais}' no reconocido.", sugerencias=list(_DOCS_POR_PAIS.keys()))
 
     limite = min(max(1, limite), MAX_LIMIT)
-    q_norm          = _normalize(consulta)     if consulta     else ""
-    rango_norm      = _normalize(rango)        if rango        else ""
-    estado_norm     = _normalize(estado)       if estado       else ""
-    jurisdiccion_norm = _normalize(jurisdiccion) if jurisdiccion else ""
-    departamento_norm = _normalize(departamento) if departamento else ""
-    anno_clean      = anno.strip()
-    fecha_desde_clean = fecha_desde.strip()
-    fecha_hasta_clean = fecha_hasta.strip()
-    derogada_desde_clean = derogada_desde.strip()
-    derogada_hasta_clean = derogada_hasta.strip()
-    actualizada_desde_clean = actualizada_desde.strip()
-    actualizada_hasta_clean = actualizada_hasta.strip()
-
-    # La intersección de texto va ANTES del bucle y no dentro: es el paso más
-    # barato (0,08 ms) y el más selectivo — puede recortar el 95% de los
-    # candidatos —, así que sustituye a `_iter_docs` como fuente en vez de
-    # sumarse a la cadena de filtros. Medido al diseñar #31.
-    ids_texto = None
-    if texto:
-        paises = [pais] if pais else list(_DOCS_POR_PAIS)
-        ids_texto = set()
-        for codigo in paises:
-            encontrados = _docs_con_texto(codigo, texto)
-            if encontrados:
-                ids_texto |= {(codigo, doc_id) for doc_id in encontrados}
-        if not ids_texto:
-            return []
 
     resultados = []
     skipped = 0
-
-    for pais_code, doc_id, doc in _iter_docs(pais):
-        if ids_texto is not None and (pais_code, doc_id) not in ids_texto:      continue
-        # Los filtros de fecha van delante: comparan cadenas tal cual y
-        # descartan sin normalizar nada. Antes el de título corría primero, así
-        # que una consulta que un filtro posterior iba a descartar igualmente
-        # pagaba el título entero — 859 ms de más sobre el corpus español.
-        fp = doc.get("fecha_publicacion", "")
-        if anno_clean        and not fp.startswith(anno_clean):                                     continue
-        if fecha_desde_clean and fp and fp < fecha_desde_clean:                                     continue
-        if fecha_hasta_clean and fp and fp > fecha_hasta_clean:                                     continue
-
-        # Derogación y última actualización, a diferencia de la publicación,
-        # exigen que el campo EXISTA. `fecha_derogacion` está vacía en 10.367 de
-        # los 12.291 documentos españoles, así que tratar el vacío como "pasa el
-        # filtro" haría que "derogadas antes de 2020" devolviera también todas
-        # las que siguen vigentes — la respuesta contraria a la pregunta.
-        if derogada_desde_clean or derogada_hasta_clean:
-            fd = doc.get("fecha_derogacion", "")
-            if not fd:                                                                              continue
-            if derogada_desde_clean and fd < derogada_desde_clean:                                  continue
-            if derogada_hasta_clean and fd > derogada_hasta_clean:                                  continue
-        if actualizada_desde_clean or actualizada_hasta_clean:
-            fa = doc.get("ultima_actualizacion", "")
-            if not fa:                                                                              continue
-            if actualizada_desde_clean and fa < actualizada_desde_clean:                            continue
-            if actualizada_hasta_clean and fa > actualizada_hasta_clean:                            continue
-
-        if estado_norm       and estado_norm       not in _campo_normalizado(doc, "estado"):        continue
-        if rango_norm        and rango_norm        not in _campo_normalizado(doc, "rango"):         continue
-        if jurisdiccion_norm and jurisdiccion_norm not in _campo_normalizado(doc, "jurisdiccion"):  continue
-        if departamento_norm and departamento_norm not in _campo_normalizado(doc, "departamento"):  continue
-        if q_norm            and q_norm            not in _campo_normalizado(doc, "titulo"):        continue
-
+    for pais_code, doc_id, doc in _filtrar_docs(
+        consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
+        fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
+        actualizada_desde, actualizada_hasta,
+    ):
         if skipped < offset:
             skipped += 1
             continue
-
         resultados.append(_doc_resumen(doc_id, doc, pais_code))
         if len(resultados) >= limite:
             break
 
     return resultados
+
+@mcp.tool()
+def contar_leyes(
+    consulta: str = "",
+    texto: str = "",
+    pais: str = "",
+    rango: str = "",
+    estado: str = "",
+    anno: str = "",
+    jurisdiccion: str = "",
+    departamento: str = "",
+    fecha_desde: str = "",
+    fecha_hasta: str = "",
+    derogada_desde: str = "",
+    derogada_hasta: str = "",
+    actualizada_desde: str = "",
+    actualizada_hasta: str = "",
+) -> Conteo | ErrorRespuesta:
+    """
+    Cuenta cuántas leyes cumplen unos filtros, sin devolverlas.
+
+    Acepta exactamente los mismos filtros que `buscar_ley`. Sirve para saber si
+    lo que devuelve una búsqueda es todo lo que hay o solo los primeros
+    `limite`: sin orden por relevancia, esos primeros son arbitrarios, así que
+    recibir 100 sin saber que existen 1.092 lleva a razonar sobre una respuesta
+    parcial como si fuera completa.
+
+    Es una herramienta aparte y no un campo en `buscar_ley` porque añadirlo
+    cambiaría el tipo de retorno de lista a objeto, y toda llamada existente que
+    la trate como lista dejaría de funcionar en silencio.
+    """
+    if not _DOCS_POR_PAIS:
+        return ErrorRespuesta(error="No hay índices disponibles.")
+
+    if pais and pais not in _DOCS_POR_PAIS:
+        return ErrorRespuesta(error=f"País '{pais}' no reconocido.",
+                              sugerencias=list(_DOCS_POR_PAIS.keys()))
+
+    # Mismo generador que `buscar_ley`, para que el conteo no pueda describir
+    # una consulta distinta de la que el cliente va a ejecutar después.
+    return Conteo(total=sum(1 for _ in _filtrar_docs(
+        consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
+        fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
+        actualizada_desde, actualizada_hasta,
+    )))
 
 @mcp.tool()
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
