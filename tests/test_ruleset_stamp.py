@@ -23,6 +23,7 @@ import re
 import pytest
 
 import legalize_injection as inj
+import legalize_tokenizer as tok
 
 
 def rehacer(pattern, **cambios):
@@ -238,6 +239,12 @@ def test_check_updates_stays_quiet_when_the_rules_match(
             "directorio_base": "repos/legalize-xx",
             "git_commit": "abc1234",
             "seguridad": {"patrones": inj.huella()},
+            # El sello del tokenizador entró con #31: `check_updates` reporta
+            # TOKENS cuando falta, igual que reporta REGLAS. Este test dice
+            # "silencioso cuando las reglas coinciden", así que tiene que
+            # declarar las de las dos superficies — si no, comprobaría el
+            # silencio de una mientras la otra grita.
+            "tokenizador": tok.huella(),
         },
         "documentos": {},
     }), encoding="utf-8")

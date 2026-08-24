@@ -37,6 +37,7 @@ if str(_PROJECT_DIR) not in sys.path:
 
 import legalize_injection  # noqa: E402  (requiere el sys.path de arriba)
 import legalize_repo  # noqa: E402  (idem)
+import legalize_tokenizer  # noqa: E402  (idem)
 
 
 def main() -> None:
@@ -56,6 +57,7 @@ def main() -> None:
 
     outdated = []
     huella_actual = legalize_injection.huella()
+    huella_tok_actual = legalize_tokenizer.huella()
 
     for index_path in sorted(_INDICES_DIR.glob("index_*.json")):
         try:
@@ -91,6 +93,28 @@ def main() -> None:
                           f"el escáner está en {huella_actual}")
             print(
                 f"{label} REGLAS    — {motivo}"
+                f"\n           → python scripts/update_index.py --repo {dir_base}"
+            )
+            outdated.append(pais)
+
+        # El tokenizador es ortogonal a las otras dos comprobaciones por el
+        # mismo motivo que el ruleset lo es al commit: un índice puede estar al
+        # día en disco y auditado con las reglas vigentes, y aun así llevar
+        # listas de postings construidas con un patrón de token, una longitud
+        # mínima o una tabla de normalización que ya cambiaron.
+        huella_tok_indice = meta.get("tokenizador", "")
+        if huella_tok_indice != huella_tok_actual:
+            if huella_tok_indice:
+                motivo = (f"tokenizado con {huella_tok_indice}, "
+                          f"el tokenizador está en {huella_tok_actual}")
+            else:
+                # Un índice anterior a que esto existiera no lleva sello. Darlo
+                # por vigente dejaría a cada índice previo reclamando un
+                # tokenizador con el que nunca se construyó.
+                motivo = (f"no registra con qué tokenizador se construyó; "
+                          f"el tokenizador está en {huella_tok_actual}")
+            print(
+                f"{label} TOKENS    — {motivo}"
                 f"\n           → python scripts/update_index.py --repo {dir_base}"
             )
             outdated.append(pais)
