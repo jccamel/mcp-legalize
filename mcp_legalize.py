@@ -199,8 +199,22 @@ def _campo_normalizado(doc: dict, campo: str) -> str:
 
 # ─────────────────────────── Carga Dinámica de Índices ────────────────────────
 
-# Almacenamos los documentos como dicts crudos para evitar el coste de construir
-# 50k+ objetos Pydantic al arrancar. Pydantic solo se usa al serializar respuestas.
+# Los documentos se guardan como dicts crudos. Pydantic solo se usa al serializar
+# respuestas, y eso NO es por coste: validar los 12.291 documentos españoles con
+# un modelo cuesta 0,17 s y 15 MB sobre un arranque de 2,67 s. El motivo por el
+# que este comentario decía otra cosa es que Pydantic v2 movió su núcleo a Rust.
+#
+# La razón real es la política ante un documento malformado. Un modelo lanzaría
+# ValidationError al cargar, que aquí significa rechazar el índice entero por
+# culpa de una entrada. Este servidor hace lo contrario a propósito: `_bytes_de`
+# degrada a 0, `_truncar_metadatos` recorta, `_load_indices` descarta la entrada
+# y conserva el resto. Es la regla que fijó `_read_file` — una ley ilegible
+# degrada a texto vacío, no a un fallo — y la que cerró #14 y #18.
+#
+# Fallar pronto y fuerte es correcto en una API HTTP, donde se rechaza la
+# petición y no se pierde nada. Sobre un corpus de 12.291 documentos, donde uno
+# viene torcido, deja al cliente sin los otros 12.290. Los `isinstance` de este
+# módulo no son validación que Pydantic pudiera ahorrarse: son esa política.
 _DOCS_POR_PAIS: dict[str, dict[str, dict]] = {}
 _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
