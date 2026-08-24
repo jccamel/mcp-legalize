@@ -13,6 +13,7 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 import argparse
 import json
 import os
+import pickle
 import sys
 import tempfile
 import time
@@ -34,6 +35,7 @@ if str(_PROJECT_DIR) not in sys.path:
 import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
 import legalize_injection  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
+import legalize_tokenizer  # noqa: E402  (idem)
 
 # Non-law markdown files that must never end up in the index.
 _SKIP_STEMS = {"readme", "license", "licence", "contributing", "code_of_conduct", "changelog", "authors"}
@@ -206,11 +208,15 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
     """Construye una entrada de índice para un documento .md.
 
     Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos,
-    campos_truncados)
+    campos_truncados, terminos)
     """
     text = md_path.read_text(encoding="utf-8", errors="replace")
     hallazgos = _check_injection(text)
     meta = _parse_frontmatter(text)
+    # Se aprovecha la lectura que ya se hacía para escanear. Tokenizar aquí
+    # cuesta una pasada más sobre un texto que ya está en memoria; hacerlo en
+    # otro sitio costaría volver a leer 921 MB del disco.
+    terminos = legalize_tokenizer.tokens_de_documento(text)
 
     try:
         ruta_relativa = md_path.relative_to(base_dir).as_posix()
@@ -259,7 +265,58 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
     # Truncar antes de escanear: el escaneo cuesta en proporción al texto y no
     # tiene sentido pagarlo sobre una franja que no va a entrar en el índice.
     truncados = _truncar_metadatos(entry)
-    return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados
+    return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados, terminos
+
+def _ruta_invertido(index_path: Path) -> Path:
+    """El `.bin` que acompaña a un índice JSON.
+
+    Fichero aparte y no una sección del JSON, por dos razones medidas. Los
+    postings en pickle cargan 8,9x más rápido que su equivalente JSON — pero lo
+    decisivo es que `json.load` no sabe leer una sección suelta: fundirlos
+    obligaría al servidor a parsear 85 MB de postings para llegar a los 8,7 MB
+    de metadatos que necesita al arrancar, y haría imposible la carga perezosa.
+    """
+    return index_path.parent / f"inverted_{index_path.stem.removeprefix('index_')}.bin"
+
+def _invertir(terminos_por_doc: dict[str, set[str]]) -> dict[str, list[str]]:
+    """De documento->términos a término->documentos.
+
+    Las listas van ordenadas para que dos índices construidos sobre el mismo
+    corpus salgan byte a byte iguales: un `.bin` que cambia sin que cambie nada
+    real haría ruido en cualquier comprobación de frescura.
+    """
+    postings: dict[str, list[str]] = {}
+    for doc_id, terminos in terminos_por_doc.items():
+        for termino in terminos:
+            postings.setdefault(termino, []).append(doc_id)
+    return {t: sorted(docs) for t, docs in sorted(postings.items())}
+
+def _write_invertido(index_path: Path, terminos_por_doc: dict[str, set[str]]) -> int:
+    """Escribe el índice invertido y devuelve cuántos términos tiene.
+
+    Lleva su propia huella del tokenizador además de la que va en el JSON: un
+    `.bin` separado de su índice sigue siendo legible, y tiene que poder decir
+    con qué reglas se construyó sin depender de un fichero que quizá no esté.
+    """
+    postings = _invertir(terminos_por_doc)
+    payload = {
+        "tokenizador": legalize_tokenizer.huella(),
+        "postings": postings,
+    }
+    ruta = _ruta_invertido(index_path)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=ruta.parent, suffix=".tmp", prefix=".inverted_")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            pickle.dump(payload, fh, protocol=5)
+        os.replace(tmp_path, ruta)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return len(postings)
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -483,6 +540,8 @@ def main() -> None:
     metadatos: dict[str, list[str]] = {}
     # Ficheros con algún valor de frontmatter por encima de `_MAX_META_CHARS`.
     truncados: dict[str, list[str]] = {}
+    # Términos de cada documento aceptado, para volcar al índice invertido.
+    terminos_por_doc: dict[str, set[str]] = {}
 
     pendientes = nuevos + actualizados
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
@@ -491,7 +550,7 @@ def main() -> None:
         md_path = md_files[rel]
         progreso.avanzar(md_stats[rel].size)
         try:
-            doc_id, entry, hallazgos, hallazgos_meta, campos_truncados = _build_entry(
+            doc_id, entry, hallazgos, hallazgos_meta, campos_truncados, terminos = _build_entry(
                 md_path, md_stats[rel], repo_dir, fallback_pais)
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
@@ -552,6 +611,13 @@ def main() -> None:
             entry["identificador"] = doc_id
 
         documentos[doc_id] = entry
+        # Los términos se registran AQUÍ y no al construir la entrada: aquí el
+        # documento ya ha superado la cuarentena y el `doc_id` ya es el
+        # definitivo tras resolver duplicados. Indexar antes dejaría un
+        # documento en cuarentena encontrable por búsqueda aunque
+        # `obtener_ley` se negara a servirlo, que es un agujero y no una
+        # defensa.
+        terminos_por_doc[doc_id] = terminos
 
     progreso.cerrar()
 
@@ -673,6 +739,13 @@ def main() -> None:
         # de otro repositorio, que es justo lo que hacía antes.
         meta_idx.pop("git_commit", None)
 
+    # Con qué tokenizador se construyó el invertido, no solo cuándo. Mismo
+    # motivo que la huella del ruleset: cambiar el patrón de token, la longitud
+    # mínima o la tabla de normalización deja listas de postings que responden a
+    # reglas que ya no existen, y sin este sello no hay forma de distinguirlas
+    # de las buenas salvo reconstruyendo a ciegas.
+    meta_idx["tokenizador"] = legalize_tokenizer.huella()
+
     print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
     try:
         _write_atomic(index_path, data)
@@ -681,8 +754,21 @@ def main() -> None:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
+    print("Escribiendo índice invertido …", end=" ", flush=True)
+    try:
+        n_terminos = _write_invertido(index_path, terminos_por_doc)
+        print("OK")
+    except Exception as exc:
+        # El índice JSON ya está escrito y es utilizable sin el invertido: la
+        # búsqueda a texto completo se degrada, el resto del servidor no. Fallar
+        # entero aquí convertiría un problema de una función en uno de todas.
+        print(f"\n[ERROR] no se pudo escribir el índice invertido: {exc}",
+              file=sys.stderr)
+        n_terminos = 0
+
     seguridad = meta_idx["seguridad"]
     print(f"Indexados         : {len(documentos):,}")
+    print(f"Términos indexados: {n_terminos:,}")
     if seguridad["avisos"]:
         print(f"Avisos            : {len(seguridad['avisos']):,} (informativos, indexados)")
     if seguridad["forzados"]:
