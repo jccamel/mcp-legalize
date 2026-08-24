@@ -669,8 +669,13 @@ def buscar_ley(
     estado: str = "",
     anno: str = "",
     jurisdiccion: str = "",
+    departamento: str = "",
     fecha_desde: str = "",
     fecha_hasta: str = "",
+    derogada_desde: str = "",
+    derogada_hasta: str = "",
+    actualizada_desde: str = "",
+    actualizada_hasta: str = "",
     limite: int = DEFAULT_LIMIT,
     offset: int = 0,
 ) -> list[DocumentoResumen] | ErrorRespuesta:
@@ -683,8 +688,21 @@ def buscar_ley(
     - estado: in_force, repealed, partially_repealed, annulled, expired.
     - anno: año exacto de publicación (e.g. "2001").
     - jurisdiccion: sub-jurisdicción (e.g. "es-an", "es-ct").
+    - departamento: organismo que la dicta (e.g. "hacienda", "jefatura").
     - fecha_desde / fecha_hasta: rango de fechas de publicación (YYYY-MM-DD o YYYY).
+    - derogada_desde / derogada_hasta: rango de fechas de derogación.
+    - actualizada_desde / actualizada_hasta: rango de últimas actualizaciones.
     - limite / offset: paginación.
+
+    Los tres últimos campos ya se indexaban y se devolvían en cada resultado;
+    lo que faltaba era poder preguntar por ellos. Cuáles llevan filtro se decidió
+    por cardinalidad sobre el corpus español, no añadiendo uno por columna:
+    `departamento` tiene 149 valores distintos en 12.291 documentos y agrupa,
+    mientras que `fuente` e `identificador` tienen uno por documento — filtrar
+    por ellos es `obtener_ley` dando un rodeo.
+
+    Las fechas van por rango y no por igualdad porque solo `fecha_derogacion` ya
+    tiene 1.152 valores distintos: nadie busca una fecha de derogación exacta.
     """
     if not _DOCS_POR_PAIS:
         return ErrorRespuesta(error="No hay índices disponibles.")
@@ -697,9 +715,14 @@ def buscar_ley(
     rango_norm      = _normalize(rango)        if rango        else ""
     estado_norm     = _normalize(estado)       if estado       else ""
     jurisdiccion_norm = _normalize(jurisdiccion) if jurisdiccion else ""
+    departamento_norm = _normalize(departamento) if departamento else ""
     anno_clean      = anno.strip()
     fecha_desde_clean = fecha_desde.strip()
     fecha_hasta_clean = fecha_hasta.strip()
+    derogada_desde_clean = derogada_desde.strip()
+    derogada_hasta_clean = derogada_hasta.strip()
+    actualizada_desde_clean = actualizada_desde.strip()
+    actualizada_hasta_clean = actualizada_hasta.strip()
 
     resultados = []
     skipped = 0
@@ -713,9 +736,27 @@ def buscar_ley(
         if anno_clean        and not fp.startswith(anno_clean):                                     continue
         if fecha_desde_clean and fp and fp < fecha_desde_clean:                                     continue
         if fecha_hasta_clean and fp and fp > fecha_hasta_clean:                                     continue
+
+        # Derogación y última actualización, a diferencia de la publicación,
+        # exigen que el campo EXISTA. `fecha_derogacion` está vacía en 10.367 de
+        # los 12.291 documentos españoles, así que tratar el vacío como "pasa el
+        # filtro" haría que "derogadas antes de 2020" devolviera también todas
+        # las que siguen vigentes — la respuesta contraria a la pregunta.
+        if derogada_desde_clean or derogada_hasta_clean:
+            fd = doc.get("fecha_derogacion", "")
+            if not fd:                                                                              continue
+            if derogada_desde_clean and fd < derogada_desde_clean:                                  continue
+            if derogada_hasta_clean and fd > derogada_hasta_clean:                                  continue
+        if actualizada_desde_clean or actualizada_hasta_clean:
+            fa = doc.get("ultima_actualizacion", "")
+            if not fa:                                                                              continue
+            if actualizada_desde_clean and fa < actualizada_desde_clean:                            continue
+            if actualizada_hasta_clean and fa > actualizada_hasta_clean:                            continue
+
         if estado_norm       and estado_norm       not in _campo_normalizado(doc, "estado"):        continue
         if rango_norm        and rango_norm        not in _campo_normalizado(doc, "rango"):         continue
         if jurisdiccion_norm and jurisdiccion_norm not in _campo_normalizado(doc, "jurisdiccion"):  continue
+        if departamento_norm and departamento_norm not in _campo_normalizado(doc, "departamento"):  continue
         if q_norm            and q_norm            not in _campo_normalizado(doc, "titulo"):        continue
 
         if skipped < offset:
