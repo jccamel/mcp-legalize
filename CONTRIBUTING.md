@@ -97,6 +97,19 @@ Commit by work unit: one deliverable behaviour per commit, with its tests. Not
 `type/description`, matching the commit types: `fix/`, `docs/`, `perf/`,
 `test/`, `style/`, `ci/`, `build/`.
 
+`main` is protected. All four matrix jobs — `test (3.10)` through `test (3.13)` —
+must pass before a pull request can merge, the branch must be up to date with
+`main` first, and force-pushes and deletions are refused.
+
+There is no required review, because a single maintainer cannot approve their own
+pull request and the rule would block every change rather than improve any. Add
+one when a second person has commit access.
+
+Administrators are not bound by the checks. That is deliberate and narrow: it
+exists for recovering from a broken `main`, not for merging past a red build.
+The four CI guards are only worth having if a failing one actually stops
+something.
+
 Pull request bodies follow a shape:
 
 1. **What was wrong** — with the reproduction, and line numbers
