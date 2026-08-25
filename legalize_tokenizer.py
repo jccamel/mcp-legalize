@@ -29,8 +29,23 @@ _MIN_LONGITUD = 3
 #
 # Esto explica por qué el tokenizador español funciona sin cambios sobre el
 # corpus sueco: `_NORMALIZE_TABLE` pliega å ä ö antes de que este patrón las
-# vea. Que ese plegado sea correcto para el sueco es otra cuestión, medida y
-# abierta en #32.
+# vea.
+#
+# Para el sueco ese plegado es lingüísticamente falso — å, ä y ö son letras
+# distintas del alfabeto, no vocales acentuadas — y funde palabras que no se
+# parecen: `får` (puede) con `far` (padre), `ändra` (modificar) con `andra`
+# (otros). Medido en #32: colisiona el 0,7% de los términos, pero entre ellos
+# está el vocabulario legal más frecuente.
+#
+# Se acepta a propósito, no por descuido. El plegado es comportamiento de todo
+# el servidor (13 usos de `_normalize`), así que cambiarlo solo aquí haría que
+# `texto` y `consulta` discreparan sobre el mismo documento — el hueco que A1 y
+# A2 cerraron. Cambiarlo en todos exige normalización por idioma, que es un
+# rediseño y no un arreglo. Lo que decide no es una medición sino si a un
+# lector sueco le resulta inaceptable, y eso no se adivina.
+#
+# `huella` cubre la tabla, así que el día que cambie los índices viejos quedan
+# invalidados solos.
 _PATRON_TOKEN = re.compile(rf"[0-9a-z]{{{_MIN_LONGITUD},}}")
 
 # Presencia o frecuencia. Entra en la huella a propósito: si algún día se guarda
@@ -76,8 +91,9 @@ def huella() -> str:
     - la longitud mínima, que hoy vive dentro del patrón pero debe seguir
       contando si algún día se saca de ahí;
     - la tabla de normalización, aunque viva en `mcp_legalize`: es parte del
-      tokenizador aunque no esté en este fichero, y #32 propone justamente
-      cambiarla para el sueco;
+      tokenizador aunque no esté en este fichero. #32 midió lo que costaría
+      cambiarla para el sueco y se cerró aceptando el plegado, pero el día que
+      se revise esta huella es lo que invalida los índices construidos antes;
     - la regla de recorte del frontmatter, que decide qué es cuerpo;
     - presencia frente a frecuencia.
     """
