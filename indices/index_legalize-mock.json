@@ -1,17 +1,22 @@
 {
   "_meta": {
-    "generado_en": "2026-08-20T13:26:57",
+    "generado_en": "2026-10-16T21:10:12",
     "total_documentos": 1,
     "directorio_base": "repos/legalize-mock",
     "pais_predeterminado": "mock",
     "version": "2.0.0",
     "seguridad": {
-      "escaneado_en": "2026-08-20T13:26:57",
+      "escaneado_en": "2026-10-16T21:10:12",
       "patrones": "03446b5a64e4",
       "cuarentena": {},
       "forzados": {},
-      "avisos": {}
-    }
+      "avisos": {},
+      "duplicados": {},
+      "metadatos": {},
+      "truncados": {}
+    },
+    "tokenizador": "b6093ec5dd8f",
+    "generacion": "122151e0db8e78e58428f965c0d823e6"
   },
   "documentos": {
     "MOCK-1": {
@@ -25,8 +30,8 @@
       "fuente": "https://example.com",
       "_archivo": "mock_law.md",
       "_ruta": "mock/mock_law.md",
-      "_bytes": 348,
-      "_mtime": 1787153015.9000516
+      "_bytes": 330,
+      "_mtime": 1792180564.2294488
     }
   }
 }

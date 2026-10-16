@@ -284,25 +284,25 @@ con `.venv/bin/python`.
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T041 Regenerar `indices/index_legalize-mock.json` y crear `indices/inverted_legalize-mock.postings` con `.venv/bin/python scripts/update_index.py --repo repos/legalize-mock --force-all`. Comprobar que `scripts/check_updates.py` ya no marca el mock por `TOKENS` ni `POSTINGS` (sí lo marcará `SIN GIT`, por diseño) y versionar los dos ficheros.
-- [ ] T042 [P] Crear `docs/decisiones/0007-postings-en-formato-de-texto-propio.md` con la plantilla. Debe recoger:
+- [X] T041 Regenerar `indices/index_legalize-mock.json` y crear `indices/inverted_legalize-mock.postings` con `.venv/bin/python scripts/update_index.py --repo repos/legalize-mock --force-all`. Comprobar que `scripts/check_updates.py` ya no marca el mock por `TOKENS` ni `POSTINGS` (sí lo marcará `SIN GIT`, por diseño) y versionar los dos ficheros.
+- [X] T042 [P] Crear `docs/decisiones/0007-postings-en-formato-de-texto-propio.md` con la plantilla. Debe recoger:
   - la decisión de R1 y R4, con la tabla de mediciones de [research.md](research.md);
   - las alternativas JSON, SQLite, msgpack y marshal;
   - generación y fusión (R2, R3).
 
   Marcar el 0003 como "Sustituida por 0007" en su fichero y en `docs/decisiones/README.md`.
-- [ ] T043 [P] Actualizar `README.md`:
+- [X] T043 [P] Actualizar `README.md`:
   - Mitigations: delimitadores sin cambios, contención de rutas con `LEGALIZE_REPOS_DIR` y un párrafo nuevo sobre los postings sin ejecución de código;
   - Index provenance: `generacion` y `tokenizador`;
   - Keeping indices current: estado `POSTINGS`;
   - Limitations: retirar lo que esta feature cierra.
 
   Mantener verdes `tests/test_readme_claims.py` y `tests/test_config_docs.py`.
-- [ ] T044 Recorrer [quickstart.md](quickstart.md) §1–§7 contra `repos/legalize-es` y `repos/legalize-se` con índices en un directorio temporal. Anotar en Notes:
+- [X] T044 Recorrer [quickstart.md](quickstart.md) §1–§7 contra `repos/legalize-es` y `repos/legalize-se` con índices en un directorio temporal. Anotar en Notes:
   - SC-006: pasada incremental del 1% y del 5% de ES, con presupuesto "≤ 20 s";
   - SC-007: arranque sin búsquedas y primera búsqueda por texto en ES, "≤ 0,36 s";
   - pico de RSS del indexado completo de ES, que no puede superar los 4,4 GB de hoy.
-- [ ] T045 Ejecutar `.venv/bin/python -m pytest -rs` (verde, exactamente 2 skips) y `scripts/update_index.py --self-test`; comprobar que el test del enlace simbólico pasa; recordar al usuario que ejecute `/security-review` (el cambio toca rutas, el índice y lo que se devuelve al modelo).
+- [X] T045 Ejecutar `.venv/bin/python -m pytest -rs` (verde, exactamente 2 skips) y `scripts/update_index.py --self-test`; comprobar que el test del enlace simbólico pasa; recordar al usuario que ejecute `/security-review` (el cambio toca rutas, el índice y lo que se devuelve al modelo).
 
 ---
 
@@ -372,7 +372,9 @@ cierran los silencios que quedarían después.
 - Línea base (T001, 2026-10-16): 383 passed, 2 skipped (385), self-test OK con 24 patrones, huella del cuerpo 03446b5a64e4.
 - Carga de `.postings` del corpus español con validación de términos (T007): 0,24 s, presupuesto 0,36 s. `docs("articulo")`: 2,7 ms.
 - T022 (ES, 25.889 docs): indexado completo 137,6 s con pico de 4,21 GB (antes 4,4 GB). Incremental del 1% (258 docs): 11,3 s y 814 MB. Del 5% (1.294 docs): 17,1 s y 1,0 GB. Presupuesto SC-006 de 20 s: cumplido. Términos tras las incrementales: 560.577, igual que el completo.
-- Mediciones SC-007 / RSS finales (T044): _pendiente_
+- T044 (quickstart contra ES y SE): §2 y §3 ver T022 y US2. §4 con un `.bin` malicioso en SE no se ejecuta nada. §5 `contar_leyes(texto="arrendamiento")` con SE sin postings devuelve total=2108 y `sin_consultar=[se: sin_postings]`; `buscar_ley(pais="se")` devuelve ErrorRespuesta; "de la" da `consulta_sin_terminos` en los dos países. §6 sello de SE alterado: check_updates sale con 1, el remedio reconstruye y check_updates sale con 0. §7 (SC-007): arranque igual que en `main` (0,47–0,48 s frente a 0,47–0,49 s; 225–226 MB frente a 225–227 MB; 34.879 docs) sin cargar postings; primera búsqueda por texto en ES 0,24 s (presupuesto 0,36 s). RSS del indexado completo de ES: 4,21 GB, por debajo de los 4,4 GB.
+- Verificación final (T045): 470 passed, 2 skipped (solo los de Windows); el test del enlace simbólico pasa; self-test OK.
+- Fuera de alcance, para una tarea aparte: `CONTRIBUTING.md` dice 318 tests (hoy 470) y el README sigue citando 12.291 documentos del corpus español (hoy 25.889).
 - Los números de corpus del README (12.291 documentos, 8,7 MB, ~85 MB) están desactualizados
   (hoy son 25.889, 19,5 MB y 142 MB), pero corregirlos queda fuera de esta spec. Conviene abrir
   una tarea aparte.

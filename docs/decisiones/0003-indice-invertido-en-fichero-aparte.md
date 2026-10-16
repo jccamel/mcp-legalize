@@ -1,6 +1,6 @@
 # 0003 — Índice invertido en un fichero aparte y cargado bajo demanda
 
-- **Estado:** Aceptada (el formato pickle está pendiente de sustituir; ver Consecuencias)
+- **Estado:** Sustituida por [0007](0007-postings-en-formato-de-texto-propio.md)
 - **Fecha:** 2026-08-24
 - **Ámbito:** `scripts/update_index.py` (`_write_invertido`), `mcp_legalize.py` (`_cargar_invertido`)
 
