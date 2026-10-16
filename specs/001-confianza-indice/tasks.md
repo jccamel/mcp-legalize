@@ -107,25 +107,25 @@ con `.venv/bin/python`.
 
 ### Tests for User Story 3 (primero, y verlos fallar)
 
-- [ ] T009 [US3] En `tests/test_full_text_search.py` (nuevo test, sin tocar los existentes), escribir un test de punta a punta: un `inverted_tst.bin` cuyo pickle crearía un fichero centinela y ningún `.postings`; después, `mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")` y comprobar que el centinela no existe. Hoy falla, porque `_cargar_invertido` lo deserializa. Anotar el fallo.
-- [ ] T010 [P] [US3] En `tests/test_inverted_index.py`, un test nuevo que comprueba que tras `update_index.py` existe `inverted_<repo>.postings`, no existe `inverted_<repo>.bin` aunque hubiera uno previo, y el `.postings` se lee con `legalize_postings.leer`. Verlo fallar.
+- [X] T009 [US3] En `tests/test_full_text_search.py` (nuevo test, sin tocar los existentes), escribir un test de punta a punta: un `inverted_tst.bin` cuyo pickle crearía un fichero centinela y ningún `.postings`; después, `mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")` y comprobar que el centinela no existe. Hoy falla, porque `_cargar_invertido` lo deserializa. Anotar el fallo.
+- [X] T010 [P] [US3] En `tests/test_inverted_index.py`, un test nuevo que comprueba que tras `update_index.py` existe `inverted_<repo>.postings`, no existe `inverted_<repo>.bin` aunque hubiera uno previo, y el `.postings` se lee con `legalize_postings.leer`. Verlo fallar.
 
 ### Adaptación de tests existentes (autorizada en plan.md)
 
-- [ ] T011 [US3] Adaptar los fixtures `corpus` de `tests/test_full_text_search.py` y de `tests/test_contar_leyes.py` para que escriban con `legalize_postings.escribir`, usando `legalize_tokenizer.huella()` en lugar de `"cafe12345678"`, una generación fija, y `_META_POR_PAIS["tst"] = {"generacion": <la misma>}`. Ningún assert cambia.
-- [ ] T012 [US3] Adaptar `leer_invertido` y los tests de nombre de fichero de `tests/test_inverted_index.py` para que usen `legalize_postings.leer` y esperen `.postings`. Ningún assert de contenido cambia.
+- [X] T011 [US3] Adaptar los fixtures `corpus` de `tests/test_full_text_search.py` y de `tests/test_contar_leyes.py` para que escriban con `legalize_postings.escribir`, usando `legalize_tokenizer.huella()` en lugar de `"cafe12345678"`, una generación fija, y `_META_POR_PAIS["tst"] = {"generacion": <la misma>}`. Ningún assert cambia.
+- [X] T012 [US3] Adaptar `leer_invertido` y los tests de nombre de fichero de `tests/test_inverted_index.py` para que usen `legalize_postings.leer` y esperen `.postings`. Ningún assert de contenido cambia.
 
 ### Implementation for User Story 3
 
-- [ ] T013 [US3] En `mcp_legalize.py`:
+- [X] T013 [US3] En `mcp_legalize.py`:
   - sustituir `_cargar_invertido` y `_invertido` por una carga vía `legalize_postings.estado(INDICES_DIR, <repo>, legalize_tokenizer.huella(), _META_POR_PAIS[pais].get("generacion"))`;
   - guardar en `_INVERTIDO_POR_PAIS[pais]` la tupla `(postings | None, motivo | None)`, cargada una sola vez y bajo demanda como hoy;
   - quitar `import pickle`;
   - emitir los avisos de [contracts/operador.md](contracts/operador.md) a stderr con el nombre de fichero formateado con `!r`.
 
   `_docs_con_texto` sigue devolviendo `None` cuando no hay postings utilizables; la señal al cliente llega en US4.
-- [ ] T014 [US3] En `scripts/update_index.py`, sustituir `_ruta_invertido` y `_write_invertido` (pickle) por `legalize_postings.escribir` y `ruta_postings`, borrar el `.bin` del formato anterior si existe tras escribir con éxito el `.postings`, y quitar `import pickle`. Provisionalmente, escribir `_meta.generacion` con la generación usada, para que los postings recién escritos sean utilizables; US1 fija el orden definitivo de escritura.
-- [ ] T015 [US3] Ejecutar T009–T012 (verdes) y la suite completa; hacer commit `fix(security): never deserialise the inverted index with pickle`.
+- [X] T014 [US3] En `scripts/update_index.py`, sustituir `_ruta_invertido` y `_write_invertido` (pickle) por `legalize_postings.escribir` y `ruta_postings`, borrar el `.bin` del formato anterior si existe tras escribir con éxito el `.postings`, y quitar `import pickle`. Provisionalmente, escribir `_meta.generacion` con la generación usada, para que los postings recién escritos sean utilizables; US1 fija el orden definitivo de escritura.
+- [X] T015 [US3] Ejecutar T009–T012 (verdes) y la suite completa; hacer commit `fix(security): never deserialise the inverted index with pickle`.
 
 **Checkpoint**: escribir en `indices/` ya no da ejecución de código. Las búsquedas por texto funcionan con índices regenerados.
 

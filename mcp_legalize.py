@@ -20,7 +20,6 @@ Configuración (variables de entorno):
 """
 
 import json
-import pickle
 import logging
 import os
 import re
@@ -31,6 +30,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 import legalize_frontmatter
+import legalize_postings
 import legalize_tokenizer
 import legalize_injection
 
@@ -220,14 +220,15 @@ _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
 
 # Índices invertidos ya cargados, por país. A diferencia de los otros tres, este
-# NO se llena al arrancar: son ~85 MB por corpus español y ~15 MB por el sueco,
-# y un despliegue cuyos clientes nunca busquen por texto no tiene por qué
-# pagarlos. Es la misma decisión que se tomó para la caché de normalización,
-# con bastante más en juego.
+# NO se llena al arrancar: son 176 MB residentes por el corpus español y 45 MB por
+# el sueco (medido en spec 001, research.md R1), y un despliegue cuyos clientes
+# nunca busquen por texto no tiene por qué pagarlos. Es la misma decisión que se
+# tomó para la caché de normalización, con bastante más en juego.
 #
-# El valor `None` significa "se intentó cargar y no se pudo", para no reintentar
-# abrir un fichero que no está en cada consulta.
-_INVERTIDO_POR_PAIS: dict[str, dict | None] = {}
+# El valor es `(postings, motivo)`: o unos postings utilizables y `None`, o
+# `None` y el motivo por el que no lo son. Se guarda también el fallo, para no
+# reintentar en cada consulta abrir un fichero que no está.
+_INVERTIDO_POR_PAIS: dict[str, tuple] = {}
 
 
 _PAIS_NOMBRE = {
@@ -603,37 +604,62 @@ def _strip_frontmatter(content: str) -> str:
     """
     return legalize_frontmatter.cuerpo(content)
 
-def _cargar_invertido(pais: str) -> dict | None:
-    """Carga el índice invertido de un país la primera vez que hace falta.
+# Qué decirle al operador según el motivo por el que unos postings no sirven.
+# Ninguno es un error del servidor: el país sigue respondiendo a todo lo que no
+# sea búsqueda por texto.
+_AVISO_POSTINGS = {
+    legalize_postings.FORMATO_ANTERIOR:
+        "formato anterior de postings (pickle), no se carga. Regenéralo",
+    legalize_postings.ILEGIBLES:
+        "postings ilegibles o con estructura inesperada; la búsqueda por texto no está "
+        "disponible. Regenéralos",
+    legalize_postings.TOKENIZADOR_DISTINTO:
+        "postings construidos con otro tokenizador. Regenéralos",
+    legalize_postings.GENERACION_DISTINTA:
+        "postings de otra generación que su índice JSON. Regenéralos",
+}
 
-    Devuelve None si no hay fichero o no se puede leer. No es un error: un
-    corpus indexado antes de que esto existiera, o cuyo `.bin` no se pudo
-    escribir, simplemente no puede responder a una búsqueda por texto. Devolver
-    un error rompería la herramienta para todos los países por culpa de uno,
-    que es lo contrario de la regla que sigue el resto del servidor.
+def _cargar_invertido(pais: str) -> tuple:
+    """Carga los postings de un país la primera vez que hace falta.
+
+    Devuelve `(postings, None)` o `(None, motivo)`, con el motivo que decide
+    `legalize_postings.estado`. Un país sin postings utilizables no es un error:
+    sigue respondiendo a todo lo que no sea búsqueda por texto. Devolver un error
+    rompería la herramienta para todos los países por culpa de uno.
+
+    Antes esto hacía `pickle.load` sobre el `.bin`, que el comentario de al lado
+    declaraba entrada no fiable: quien pudiera escribir en `indices/` ejecutaba
+    código en la primera búsqueda por texto. El formato nuevo es texto plano y el
+    `.bin` ya no se abre nunca (spec 001).
     """
     nombre = _INDEX_FILE_POR_PAIS.get(pais, "")
     if not nombre:
-        return None
-    ruta = INDICES_DIR / f"inverted_{nombre.removeprefix('index_')}.bin"
-    try:
-        with ruta.open("rb") as fh:
-            datos = pickle.load(fh)
-    except Exception as exc:
-        # El `.bin` es entrada no fiable igual que el JSON: un fichero truncado
-        # o manipulado no puede tumbar la herramienta. Lección de #18.
-        print(f"[AVISO] No se pudo cargar {ruta.name}: {exc}", file=sys.stderr)
-        return None
-    if not isinstance(datos, dict) or not isinstance(datos.get("postings"), dict):
-        print(f"[AVISO] {ruta.name}: formato inesperado; se ignora.", file=sys.stderr)
-        return None
-    return datos
+        return None, legalize_postings.SIN_POSTINGS
+    repo = nombre.removeprefix("index_")
+    meta = _META_POR_PAIS.get(pais, {})
+    postings, motivo = legalize_postings.estado(
+        INDICES_DIR, repo, legalize_tokenizer.huella(), meta.get("generacion"),
+    )
+    aviso = _AVISO_POSTINGS.get(motivo)
+    if aviso:
+        # !r en el nombre del fichero: viene del nombre del índice, que no
+        # controlamos, y no puede fabricar líneas falsas en el log.
+        fichero = legalize_postings.ruta_postings(INDICES_DIR, repo).name
+        print(
+            f"[AVISO] {fichero!r}: {aviso} con: "
+            f"python scripts/update_index.py --repo <repo de {pais!r}>",
+            file=sys.stderr,
+        )
+    return postings, motivo
 
-def _invertido(pais: str) -> dict | None:
-    """El índice invertido de un país, cargándolo una sola vez."""
+def _invertido(pais: str):
+    """Los postings utilizables de un país, o None. Se cargan una sola vez."""
     if pais not in _INVERTIDO_POR_PAIS:
         _INVERTIDO_POR_PAIS[pais] = _cargar_invertido(pais)
-    return _INVERTIDO_POR_PAIS[pais]
+    postings, motivo = _INVERTIDO_POR_PAIS[pais]
+    if postings is not None and postings.motivo is not None:
+        return None
+    return postings
 
 def _docs_con_texto(pais: str, consulta: str) -> set[str] | None:
     """Los ids del país que contienen TODOS los términos de la consulta.
@@ -645,23 +671,32 @@ def _docs_con_texto(pais: str, consulta: str) -> set[str] | None:
     Devuelve None si el país no tiene índice invertido, para que quien llama
     pueda distinguir "no hay con qué buscar" de "no hay resultados".
     """
-    invertido = _invertido(pais)
-    if invertido is None:
+    postings = _invertido(pais)
+    if postings is None:
         return None
-    postings = invertido["postings"]
     # Se tokeniza la consulta con las mismas reglas que construyeron el índice.
     # Si divergieran, buscar "PROTECCIÓN" no encontraría lo que se indexó como
     # "proteccion" — la clase de discrepancia que A2 cerró para el frontmatter.
     terminos = legalize_tokenizer.tokens(consulta)
     if not terminos:
         return None
+    # La intersección va sobre posiciones enteras de la tabla de ids, y solo
+    # al final se traducen a ids: los conjuntos de enteros se cruzan más rápido
+    # que los de cadenas.
     encontrados = None
-    for termino in terminos:
-        docs = set(postings.get(termino, ()))
-        encontrados = docs if encontrados is None else encontrados & docs
-        if not encontrados:
-            return set()
-    return encontrados
+    try:
+        for termino in terminos:
+            indices = postings.indices(termino)
+            encontrados = indices if encontrados is None else encontrados & indices
+            if not encontrados:
+                return set()
+    except ValueError:
+        # Una lista corrupta se descubre al decodificarla. El objeto queda
+        # marcado como ilegible y el país deja de ofrecer búsqueda por texto.
+        print(f"[AVISO] Postings de {pais!r} ilegibles al consultar; "
+              f"la búsqueda por texto no está disponible ahí.", file=sys.stderr)
+        return None
+    return {postings.ids[i] for i in encontrados}
 
 def _iter_docs(pais: str = ""):
     if pais and pais in _DOCS_POR_PAIS:

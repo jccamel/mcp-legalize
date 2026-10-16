@@ -10,8 +10,8 @@ index built in part 2.
 questions, and collapsing them would make one call mean two things. Every
 existing call keeps working, which is the bar #30 already met.
 
-**Loaded lazily, per corpus.** The `.bin` is ~85 MB for the Spanish corpus and
-~15 MB for the Swedish one. Loading every one at import would charge a cost at
+**Loaded lazily, per corpus.** The postings file is 75.8 MB for the Spanish corpus
+and 9.3 MB for the Swedish one (spec 001, research.md R1). Loading every one at import would charge a cost at
 startup that a deployment whose clients never search by text would never use —
 the same reasoning already accepted for the normalization cache in #15, with
 larger stakes.
@@ -27,7 +27,11 @@ import pickle
 
 import pytest
 
+import legalize_postings
+import legalize_tokenizer
 import mcp_legalize
+
+GENERACION = "a" * 32
 
 
 def documento(**campos):
@@ -57,12 +61,16 @@ def corpus(tmp_path, monkeypatch):
     }
     indices = tmp_path / "indices"
     indices.mkdir(parents=True, exist_ok=True)
-    with (indices / "inverted_tst.bin").open("wb") as fh:
-        pickle.dump({"tokenizador": "cafe12345678", "postings": postings}, fh, protocol=5)
+    # Escritos como los deja el indexador: formato sin código, sello real del
+    # tokenizador y la generación que los ata al índice JSON (spec 001).
+    legalize_postings.escribir(
+        legalize_postings.ruta_postings(indices, "tst"), postings,
+        tokenizador=legalize_tokenizer.huella(), generacion=GENERACION,
+    )
 
     monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
     monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {})
+    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {"generacion": GENERACION})
     monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
     monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
     return docs
@@ -169,7 +177,39 @@ def test_a_country_without_an_inverted_index_degrades_to_no_results(corpus, monk
 
 def test_a_corrupt_inverted_index_degrades_instead_of_raising(corpus, tmp_path, monkeypatch):
     """The `.bin` is untrusted input like the JSON index — #18's lesson."""
-    (mcp_legalize.INDICES_DIR / "inverted_tst.bin").write_bytes(b"no soy un pickle")
+    (mcp_legalize.INDICES_DIR / "inverted_tst.postings").write_bytes(b"no soy unos postings")
     monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
 
     assert mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento") == []
+
+
+# ──────────────────────── no code execution (spec 001, US3) ───────────────────
+
+class _Centinela:
+    """Unpickling this creates a file. If the file exists, code ran."""
+
+    def __init__(self, ruta):
+        self.ruta = str(ruta)
+
+    def __reduce__(self):
+        from pathlib import Path
+        return (Path(self.ruta).touch, ())
+
+
+def test_a_malicious_old_bin_runs_nothing_on_a_text_search(corpus, tmp_path, monkeypatch):
+    """Write access to `indices/` must not be code execution (principle II).
+
+    The server used to `pickle.load` the `.bin` on the first full-text query.
+    A pickle can name any callable to run while it is being read, so a planted
+    file ran arbitrary code inside the server process. The old `.bin` is now
+    recognised by its name and never opened.
+    """
+    centinela = tmp_path / "pwned"
+    (mcp_legalize.INDICES_DIR / "inverted_tst.bin").write_bytes(
+        pickle.dumps(_Centinela(centinela))
+    )
+    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+
+    mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
+
+    assert not centinela.exists()
