@@ -593,6 +593,13 @@ def main() -> None:
         index_path.parent, _nombre_repo(index_path),
         legalize_tokenizer.huella(), meta_idx.get("generacion"),
     )
+    # El sello del JSON cuenta igual que la cabecera de los postings. Es el que
+    # mira `check_updates.py` para decir TOKENS, así que si no forzara nada aquí,
+    # el remedio que propone respondería "ya está al día" y el aviso volvería
+    # en cada pasada (spec 001, US5; FR-013, FR-014).
+    if (motivo_previo is None and documentos
+            and meta_idx.get("tokenizador") != legalize_tokenizer.huella()):
+        postings_previos, motivo_previo = None, legalize_postings.TOKENIZADOR_DISTINTO
     if motivo_previo is not None and documentos:
         print(f"Índice invertido  : se reconstruye ({motivo_previo})")
 
