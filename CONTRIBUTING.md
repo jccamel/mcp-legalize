@@ -64,7 +64,7 @@ These will fail if you change prose without changing code, or the reverse:
 | File | Enforces |
 |---|---|
 | `test_readme_claims.py` | Every tool and every `_meta.seguridad` field is documented; the language count matches the scanner |
-| `test_config_docs.py` | The docstring, the README and the code agree on all four environment variables and their defaults |
+| `test_config_docs.py` | The docstring, the README and the code agree on all five environment variables and their defaults |
 | `test_prose_style.py` | Spanish comments keep their diacritics; code inside prose is left alone |
 
 Prose that nothing checks drifts. That is the point.

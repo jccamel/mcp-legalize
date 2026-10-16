@@ -163,17 +163,21 @@ git -C repos/legalize-es pull
 python scripts/update_index.py --repo repos/legalize-es
 ```
 
-It reports two independent kinds of staleness:
+It reports four independent kinds of staleness:
 
 | State | Meaning |
 |---|---|
 | `DESACTUAL` | The corpus has commits the index does not cover |
 | `REGLAS` | The index was audited under a different scanner ruleset |
+| `TOKENS` | The postings were built under a different tokenizer |
+| `POSTINGS` | The postings are missing, unreadable, in the old pickle format, or belong to another generation of the JSON index |
 
-The second is not a variant of the first. An index can match the corpus exactly
-and still carry findings computed under patterns that no longer exist. Re-running
-`update_index.py` resolves either, and a ruleset mismatch forces a full rescan
-rather than an incremental one.
+None is a variant of another. An index can match the corpus exactly and still
+carry findings computed under patterns that no longer exist, or postings built
+under rules that have since changed. Each line proposes the command that
+resolves it, and running that command once resolves it: a ruleset mismatch
+forces a full rescan, and a tokenizer or postings problem forces the postings to
+be rebuilt even when nothing changed on disk.
 
 ---
 
@@ -536,6 +540,27 @@ a security control.
 | `--show-warnings` | Print `warn`-level findings, which are counted in the summary by default |
 | `--self-test` | Verify the security patterns and exit; requires no repository |
 
+#### 7. Code-free postings (High)
+
+The inverted index behind `texto` used to be a pickle, loaded with
+`pickle.load` on the first full-text query. A pickle names callables to run
+while it is read, so write access to `indices/` was code execution inside the
+server. It is now `inverted_<repo>.postings`, a plain text format this project
+owns and reads with `str.split` and `int()`:
+
+- The old `inverted_<repo>.bin` is recognised by its name and **never opened**.
+  The country reports `formato_anterior` until it is reindexed, and the indexer
+  deletes the `.bin` once its replacement is written.
+- Every structural rule is validated at load; a malformed file costs full-text
+  search in that country and nothing else.
+- The postings carry the tokenizer fingerprint and a random `generacion` shared
+  with their JSON index. Postings from another tokenizer or paired with another
+  JSON are not used.
+
+Measured on the Spanish corpus it also beats the pickle on every axis: 75.8 MB
+on disk against 142.3, 0.24 s to load with validation against 0.36, and 176 MB
+resident against 394. See `docs/decisiones/0007-postings-en-formato-de-texto-propio.md`.
+
 ### Index provenance
 
 `_meta.seguridad` records what the scan found and what it was looking for:
@@ -563,6 +588,17 @@ and the canonical form of each regex — rather than maintained by hand, because
 anything that depends on someone remembering to update it drifts. It deliberately
 ignores the order of the table, and changes to metadata-only patterns, since
 neither affects what a body scan finds.
+
+Two more stamps sit beside `seguridad` in `_meta`, and describe the postings:
+
+| Field | Meaning |
+|---|---|
+| `tokenizador` | Fingerprint of the tokenizer the postings were built with |
+| `generacion` | Random identifier shared with the postings file written in the same run |
+
+Both are written only when the postings really were. The postings are written
+first and the JSON second, so an interrupted run leaves a mismatch the next run
+detects and repairs, rather than stamps that nothing backs.
 
 ### Limitations and remaining risk
 
@@ -604,7 +640,12 @@ neither affects what a body scan finds.
 - Invisible-character obfuscation and NFKC-revealed payloads in metadata.
 - Path traversal and file disclosure through index manipulation, including
   absolute paths, parent traversal, escaping symlinks and control characters in
-  stored paths.
+  stored paths — and a corpus root declared by the index itself, which is now
+  checked against `LEGALIZE_REPOS_DIR`.
+- Code execution through a planted postings file: the format cannot run code,
+  and the old pickle is never opened.
+- Log-line forgery through index file names and country codes, which every
+  loader message formats with `!r`.
 - Tag injection through unescaped attributes.
 - Accidental, non-adversarial broken Markdown.
 
