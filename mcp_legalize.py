@@ -644,7 +644,11 @@ def _cargar_invertido(pais: str) -> tuple:
     if aviso:
         # !r en el nombre del fichero: viene del nombre del índice, que no
         # controlamos, y no puede fabricar líneas falsas en el log.
-        fichero = legalize_postings.ruta_postings(INDICES_DIR, repo).name
+        # Con el formato anterior el fichero que está es el `.bin`, y es el que
+        # hay que nombrar: el `.postings` precisamente no existe.
+        ruta = (legalize_postings.ruta_formato_anterior if motivo == legalize_postings.FORMATO_ANTERIOR
+                else legalize_postings.ruta_postings)
+        fichero = ruta(INDICES_DIR, repo).name
         print(
             f"[AVISO] {fichero!r}: {aviso} con: "
             f"python scripts/update_index.py --repo <repo de {pais!r}>",

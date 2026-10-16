@@ -18,7 +18,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import Iterable, NamedTuple
 
 _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -290,7 +290,75 @@ def _invertir(terminos_por_doc: dict[str, set[str]]) -> dict[str, list[str]]:
             postings.setdefault(termino, []).append(doc_id)
     return {t: sorted(docs) for t, docs in sorted(postings.items())}
 
-def _write_invertido(index_path: Path, terminos_por_doc: dict[str, set[str]],
+def _terminos_en_disco(documentos: dict, ids: Iterable[str], repo_dir: Path) -> dict[str, set[str]]:
+    """Tokeniza desde disco los documentos indicados del índice.
+
+    La ruta sale del índice, que es entrada no confiable también para el
+    indexador (principio II): un `_ruta` que escape del repositorio haría que
+    los términos de un fichero ajeno acabaran siendo buscables. Se exige que la
+    ruta resuelta esté dentro de `repo_dir` y sea un fichero regular; si no, el
+    documento se queda sin términos, igual que uno cuyo fichero ya no existe.
+    """
+    raiz = repo_dir.resolve()
+    terminos: dict[str, set[str]] = {}
+    for doc_id in ids:
+        ruta_rel = documentos[doc_id].get("_ruta", "")
+        if not isinstance(ruta_rel, str) or not ruta_rel:
+            continue
+        ruta = (raiz / ruta_rel).resolve()
+        if not ruta.is_relative_to(raiz) or not ruta.is_file():
+            continue
+        try:
+            texto = ruta.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        terminos[doc_id] = legalize_tokenizer.tokens_de_documento(texto)
+    return terminos
+
+
+def _postings_finales(previos, documentos: dict, terminos_por_doc: dict[str, set[str]],
+                      repo_dir: Path) -> dict[str, list[str]]:
+    """Los postings que corresponden exactamente a los documentos del JSON.
+
+    Es la invariante de FR-001: tras cualquier pasada, ni más ni menos que los
+    términos de los documentos que el índice tiene en ese momento.
+
+    FUSIONAR, si los postings previos se pueden usar: de cada término se
+    conservan los documentos que siguen en el JSON y no se han reprocesado en
+    esta pasada, y se añaden los términos de los reprocesados. Así no hace falta
+    seguir por separado cada forma de salir del índice — cuarentena, cambio de
+    identificador, huérfano retirado, duplicado —: lo que ya no está en el JSON
+    no se conserva. Medido sobre el corpus español: 10,2 s con un 5% de cambios,
+    frente a 49 s de retokenizarlo todo (research.md, R2).
+
+    RECONSTRUIR, si no se pueden usar o una lista resulta corrupta al
+    decodificarla: se tokenizan desde disco todos los documentos del JSON que
+    esta pasada no haya procesado ya.
+    """
+    nuevos = _invertir(terminos_por_doc)
+    if previos is not None:
+        descartar = {i for i, doc_id in enumerate(previos.ids)
+                     if doc_id not in documentos or doc_id in terminos_por_doc}
+        try:
+            for termino in previos.terminos():
+                indices = previos.indices(termino)
+                if descartar:
+                    indices = indices - descartar
+                if indices:
+                    nuevos.setdefault(termino, []).extend(previos.ids[i] for i in indices)
+            return nuevos
+        except ValueError as exc:
+            print(f"\n[AVISO] postings previos ilegibles al fusionar ({exc}); "
+                  f"se reconstruyen.", file=sys.stderr)
+            nuevos = _invertir(terminos_por_doc)
+
+    faltan = [d for d in documentos if d not in terminos_por_doc]
+    for termino, docs in _invertir(_terminos_en_disco(documentos, faltan, repo_dir)).items():
+        nuevos.setdefault(termino, []).extend(docs)
+    return nuevos
+
+
+def _write_invertido(index_path: Path, postings: dict[str, list[str]],
                      generacion: str) -> int:
     """Escribe los postings y devuelve cuántos términos tienen.
 
@@ -308,7 +376,7 @@ def _write_invertido(index_path: Path, terminos_por_doc: dict[str, set[str]],
     nombre = _nombre_repo(index_path)
     n = legalize_postings.escribir(
         legalize_postings.ruta_postings(index_path.parent, nombre),
-        _invertir(terminos_por_doc),
+        postings,
         tokenizador=legalize_tokenizer.huella(), generacion=generacion,
     )
     legalize_postings.ruta_formato_anterior(index_path.parent, nombre).unlink(missing_ok=True)
@@ -516,7 +584,21 @@ def main() -> None:
     print(f"Modificados       : {len(actualizados):,}")
     print(f"Huérfanos         : {len(huerfanos):,}")
 
-    if not nuevos and not actualizados and not huerfanos:
+    # Los postings previos se fusionan si se pueden usar y se reconstruyen si
+    # no. Antes se reescribían solo con los documentos de esta pasada, así que
+    # tras un `git pull` la búsqueda por texto perdía el resto del corpus sin
+    # decir nada (spec 001, US1). `estado` decide igual que el servidor: mismo
+    # formato, mismo tokenizador y misma generación que este JSON.
+    postings_previos, motivo_previo = legalize_postings.estado(
+        index_path.parent, _nombre_repo(index_path),
+        legalize_tokenizer.huella(), meta_idx.get("generacion"),
+    )
+    if motivo_previo is not None and documentos:
+        print(f"Índice invertido  : se reconstruye ({motivo_previo})")
+
+    # "Al día" exige también unos postings utilizables: un JSON correcto con los
+    # postings ausentes, de otra generación o de otro tokenizador no lo está.
+    if not nuevos and not actualizados and not huerfanos and motivo_previo is None:
         print("\nEl índice ya está al día.")
         return
 
@@ -704,7 +786,12 @@ def main() -> None:
         return dict(sorted(conservados.items()))
 
     meta_idx["seguridad"] = {
-        "escaneado_en": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        # Una pasada que solo reconstruye los postings no escanea nada, así que
+        # no puede refrescar la fecha del escaneo: afirmaría una auditoría que
+        # no ocurrió.
+        "escaneado_en": (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+                         if pendientes else previo.get("escaneado_en")
+                         or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")),
         # Con QUE se auditó, no solo cuándo. Sin esto un cambio de patrón deja
         # el índice con fecha fresca y hallazgos calculados con reglas viejas.
         "patrones": huella_actual,
@@ -735,36 +822,48 @@ def main() -> None:
         # de otro repositorio, que es justo lo que hacía antes.
         meta_idx.pop("git_commit", None)
 
-    # Con qué tokenizador se construyó el invertido, no solo cuándo. Mismo
-    # motivo que la huella del ruleset: cambiar el patrón de token, la longitud
-    # mínima o la tabla de normalización deja listas de postings que responden a
-    # reglas que ya no existen, y sin este sello no hay forma de distinguirlas
-    # de las buenas salvo reconstruyendo a ciegas.
-    meta_idx["tokenizador"] = legalize_tokenizer.huella()
-    # Ata estos postings a este JSON: el servidor no usa unos postings cuya
-    # generación no coincide con la del índice que los acompaña (spec 001).
+    # Los postings van PRIMERO y el JSON después: el JSON es el punto de
+    # confirmación. Si se interrumpe entre los dos, el JSON viejo conserva su
+    # generación vieja, el desajuste se detecta y la pasada siguiente
+    # reconstruye (research.md, R3).
+    print("Escribiendo índice invertido …", end=" ", flush=True)
     generacion = legalize_postings.nueva_generacion()
-    meta_idx["generacion"] = generacion
+    try:
+        postings = _postings_finales(
+            postings_previos, documentos, terminos_por_doc, repo_dir)
+        n_terminos = _write_invertido(index_path, postings, generacion)
+        print("OK")
+    except Exception as exc:
+        # El índice JSON sigue siendo utilizable sin el invertido: la búsqueda a
+        # texto completo se degrada, el resto del servidor no. Fallar entero
+        # aquí convertiría un problema de una función en uno de todas.
+        print(f"\n[ERROR] no se pudo escribir el índice invertido: {exc}",
+              file=sys.stderr)
+        n_terminos = 0
+        generacion = None
 
-    print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
+    # Con qué tokenizador se construyó el invertido y a qué generación
+    # pertenece. Mismo motivo que la huella del ruleset: sin estos sellos no hay
+    # forma de distinguir unos postings buenos de unos construidos con reglas que
+    # ya no existen, o para otro JSON.
+    #
+    # Solo se escriben si los postings se escribieron de verdad (FR-015). Un
+    # sello sin postings detrás afirma algo falso, y la pasada siguiente no
+    # sabría que tiene que reconstruirlos.
+    if generacion:
+        meta_idx["tokenizador"] = legalize_tokenizer.huella()
+        meta_idx["generacion"] = generacion
+    else:
+        meta_idx.pop("tokenizador", None)
+        meta_idx.pop("generacion", None)
+
+    print(f"Escribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
     try:
         _write_atomic(index_path, data)
         print("OK")
     except Exception as exc:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
-
-    print("Escribiendo índice invertido …", end=" ", flush=True)
-    try:
-        n_terminos = _write_invertido(index_path, terminos_por_doc, generacion)
-        print("OK")
-    except Exception as exc:
-        # El índice JSON ya está escrito y es utilizable sin el invertido: la
-        # búsqueda a texto completo se degrada, el resto del servidor no. Fallar
-        # entero aquí convertiría un problema de una función en uno de todas.
-        print(f"\n[ERROR] no se pudo escribir el índice invertido: {exc}",
-              file=sys.stderr)
-        n_terminos = 0
 
     seguridad = meta_idx["seguridad"]
     print(f"Indexados         : {len(documentos):,}")
