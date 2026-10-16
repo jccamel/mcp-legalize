@@ -55,8 +55,12 @@ def test_there_is_something_to_check():
     Both compare sets, so a regex that stopped matching would make them pass by
     finding nothing anywhere. This is the assertion that makes them mean
     something.
+
+    The number moves when a variable is added on purpose: it went from 4 to 5
+    with `LEGALIZE_REPOS_DIR` (spec 001), which took the corpus root out of the
+    index's hands.
     """
-    assert len(variables_leidas()) == 4
+    assert len(variables_leidas()) == 5
 
 
 def defaults_del_codigo() -> dict[str, str]:

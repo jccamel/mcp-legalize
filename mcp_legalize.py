@@ -10,6 +10,10 @@ repositorio bajo el estándar SPEC.md e indexado.
 
 Configuración (variables de entorno):
   LEGALIZE_INDICES_DIR       — directorio con los índices .json (default: <script_dir>/indices)
+  LEGALIZE_REPOS_DIR         — único directorio desde el que se leen documentos
+                               (default: <script_dir>/repos). Un índice cuyo corpus
+                               queda fuera de él no se sirve: el índice elige dentro,
+                               nunca amplía.
   LEGALIZE_DEFAULT_LIMIT     — resultados que devuelve `buscar_ley` cuando no se
                                indica `limite` (default: 20)
   LEGALIZE_MAX_LIMIT         — techo de `limite` (default: 100). Es un tope real:
@@ -67,6 +71,11 @@ except ImportError:
 _SCRIPT_DIR = Path(__file__).parent
 
 INDICES_DIR = Path(os.environ.get("LEGALIZE_INDICES_DIR", "") or _SCRIPT_DIR / "indices")
+# Único directorio desde el que se pueden leer documentos. Lo decide el
+# operador y no el índice: antes la raíz salía de `_meta.directorio_base` del
+# mismo índice que traía las rutas, y con `directorio_base: "/"` se servía
+# `/etc/hosts` (spec 001, US2).
+REPOS_DIR = Path(os.environ.get("LEGALIZE_REPOS_DIR", "") or _SCRIPT_DIR / "repos")
 DEFAULT_LIMIT = int(os.environ.get("LEGALIZE_DEFAULT_LIMIT", "20"))
 MAX_LIMIT = int(os.environ.get("LEGALIZE_MAX_LIMIT", "100"))
 MAX_CONTENT_CHARS = int(os.environ.get("LEGALIZE_MAX_CONTENT_CHARS", "80000"))
@@ -218,6 +227,10 @@ def _campo_normalizado(doc: dict, campo: str) -> str:
 _DOCS_POR_PAIS: dict[str, dict[str, dict]] = {}
 _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
+# La raíz de cada corpus, resuelta y comprobada contra LEGALIZE_REPOS_DIR al
+# cargar el índice. `_resolve_ruta` la lee de aquí y no de `_meta`, que es del
+# índice y por tanto del atacante (spec 001, US2).
+_RAIZ_POR_PAIS: dict[str, Path] = {}
 
 # Índices invertidos ya cargados, por país. A diferencia de los otros tres, este
 # NO se llena al arrancar: son 176 MB residentes por el corpus español y 45 MB por
@@ -250,11 +263,49 @@ _PAIS_NOMBRE = {
     "mock": "Mock (testing)",
 }
 
+def _raiz_del_corpus(meta: dict, autorizada: Path) -> Path:
+    """La raíz de un corpus, resuelta y comprobada contra la autorizada.
+
+    El índice puede decir dónde está su corpus, pero solo dentro de
+    `LEGALIZE_REPOS_DIR`: puede elegir, no ampliar. La raíz se calcula como
+    siempre — relativa al proyecto o absoluta — y se resuelve con los enlaces
+    seguidos antes de comprobar la contención, así que un enlace dentro del
+    directorio autorizado que apunta fuera no la cumple.
+
+    Lanza ValueError si la raíz queda fuera o no es texto.
+    """
+    dir_base = meta.get("directorio_base")
+    if dir_base is None or dir_base == "":
+        return autorizada
+    if not isinstance(dir_base, str):
+        raise ValueError(f"'directorio_base' no es texto: {dir_base!r}")
+    raiz = (_SCRIPT_DIR / dir_base).resolve()
+    if not raiz.is_relative_to(autorizada):
+        raise ValueError(
+            f"el corpus {dir_base!r} está fuera de LEGALIZE_REPOS_DIR ({str(autorizada)!r})"
+        )
+    return raiz
+
 def _load_indices():
     if not INDICES_DIR.exists() or not INDICES_DIR.is_dir():
-        print(f"[AVISO] Directorio de índices no encontrado: {INDICES_DIR}", file=sys.stderr)
+        print(f"[AVISO] Directorio de índices no encontrado: {str(INDICES_DIR)!r}", file=sys.stderr)
         return
 
+    # Si el directorio autorizado no existe no se sirve nada, en vez de caer en
+    # uno por defecto: una raíz mal configurada que se sustituye en silencio por
+    # otra es justo el tipo de frontera que no debe moverse sola.
+    autorizada = REPOS_DIR.resolve()
+    if not autorizada.is_dir():
+        print(
+            f"[SEGURIDAD] LEGALIZE_REPOS_DIR no es un directorio ({str(REPOS_DIR)!r}); "
+            f"no se sirve ningún índice.",
+            file=sys.stderr,
+        )
+        return
+
+    # Los nombres de índice y los códigos de país vienen de fuera: todo mensaje
+    # los formatea con !r, para que un salto de línea en ellos no pueda fabricar
+    # líneas falsas en el registro (FR-016).
     for index_path in sorted(INDICES_DIR.glob("index_*.json")):
         try:
             with index_path.open("r", encoding="utf-8") as f:
@@ -271,7 +322,7 @@ def _load_indices():
             if not isinstance(meta, dict):
                 if meta is not None:
                     print(
-                        f"[AVISO] {index_path.name}: '_meta' no es un objeto; "
+                        f"[AVISO] {index_path.name!r}: '_meta' no es un objeto; "
                         f"se ignora y el país se deduce del nombre del fichero.",
                         file=sys.stderr,
                     )
@@ -290,7 +341,7 @@ def _load_indices():
                 docs = data["documentos"]
                 if not isinstance(docs, dict):
                     print(
-                        f"[ERROR] {index_path.name}: 'documentos' no es un objeto "
+                        f"[ERROR] {index_path.name!r}: 'documentos' no es un objeto "
                         f"({type(docs).__name__}); índice ignorado.",
                         file=sys.stderr,
                     )
@@ -304,24 +355,36 @@ def _load_indices():
                 if descartadas:
                     docs = {k: v for k, v in docs.items() if isinstance(v, dict)}
                     print(
-                        f"[AVISO] {index_path.name}: {len(descartadas)} entrada(s) "
+                        f"[AVISO] {index_path.name!r}: {len(descartadas)} entrada(s) "
                         f"descartada(s) por no ser objetos: "
                         f"{', '.join(map(repr, descartadas[:5]))}"
                         f"{'…' if len(descartadas) > 5 else ''}",
                         file=sys.stderr,
                     )
 
+                # La raíz se decide aquí, una vez, y queda guardada: desde
+                # este momento `_resolve_ruta` no vuelve a leer `_meta`. Un
+                # índice cuyo corpus queda fuera del directorio autorizado
+                # cuesta ese índice y ninguno más (FR-005).
+                try:
+                    raiz = _raiz_del_corpus(meta, autorizada)
+                except ValueError as exc:
+                    print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.",
+                          file=sys.stderr)
+                    continue
+
                 _DOCS_POR_PAIS[pais_code] = docs
                 _META_POR_PAIS[pais_code] = meta
                 _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
+                _RAIZ_POR_PAIS[pais_code] = raiz
 
                 print(
-                    f"[Legalize MCP] [{pais_code.upper()}] {len(docs):,} docs "
-                    f"desde {index_path.name}",
+                    f"[Legalize MCP] [{pais_code.upper()!r}] {len(docs):,} docs "
+                    f"desde {index_path.name!r}",
                     file=sys.stderr,
                 )
         except Exception as exc:
-            print(f"[ERROR] No se pudo cargar {index_path.name}: {exc}", file=sys.stderr)
+            print(f"[ERROR] No se pudo cargar {index_path.name!r}: {exc}", file=sys.stderr)
 
 _load_indices()
 _TOTAL_DOCS = sum(len(d) for d in _DOCS_POR_PAIS.values())
@@ -562,9 +625,12 @@ def _resolve_ruta(doc: dict, pais_code: str) -> Path:
     if base.is_absolute():
         raise ValueError(f"Ruta absoluta no permitida en índice: {raw!r}")
 
-    meta = _META_POR_PAIS.get(pais_code, {})
-    dir_base = meta.get("directorio_base")
-    raiz = (_SCRIPT_DIR / dir_base).resolve() if dir_base else _SCRIPT_DIR.resolve()
+    # La raíz es la que `_load_indices` comprobó contra LEGALIZE_REPOS_DIR, no
+    # la que diga `_meta` ahora: el índice puede elegir dentro del directorio
+    # autorizado, nunca ampliarlo. Un país sin raíz registrada no lee nada.
+    raiz = _RAIZ_POR_PAIS.get(pais_code)
+    if raiz is None:
+        raise ValueError(f"País sin raíz autorizada: {pais_code!r}")
     ruta = (raiz / base).resolve()
 
     try:

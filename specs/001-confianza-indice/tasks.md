@@ -178,7 +178,7 @@ con `.venv/bin/python`.
 
 ### Tests for User Story 2 (primero, y verlos fallar)
 
-- [ ] T023 [P] [US2] Crear `tests/test_repos_dir.py`. Cada test carga índices escritos en `tmp_path` mediante `mcp_legalize._load_indices` con `INDICES_DIR` y `LEGALIZE_REPOS_DIR` parcheados, y asserts a través de `obtener_ley.fn` y `obtener_articulo.fn`. Casos:
+- [X] T023 [P] [US2] Crear `tests/test_repos_dir.py`. Cada test carga índices escritos en `tmp_path` mediante `mcp_legalize._load_indices` con `INDICES_DIR` y `LEGALIZE_REPOS_DIR` parcheados, y asserts a través de `obtener_ley.fn` y `obtener_articulo.fn`. Casos:
   - `directorio_base: "/"` y `_ruta: "etc/hosts"` → sin el contenido, con aviso `[SEGURIDAD]` en stderr y un índice sano vecino servido;
   - `directorio_base` relativo con `../` que escapa;
   - `directorio_base` absoluto fuera;
@@ -187,22 +187,22 @@ con `.venv/bin/python`.
   - un índice legítimo dentro se sirve igual que hoy.
 
   El primero debe fallar hoy sirviendo `/etc/hosts`.
-- [ ] T024 [P] [US2] En `tests/test_repos_dir.py`, un test de que un aviso con un nombre de índice que contenga `\n`, ` ` o `\x85` no puede fabricar una línea falsa en stderr (FR-016), como hace hoy `test_no_rejection_message_can_forge_a_security_log_line`.
+- [X] T024 [P] [US2] En `tests/test_repos_dir.py`, un test de que un aviso con un nombre de índice que contenga `\n`, ` ` o `\x85` no puede fabricar una línea falsa en stderr (FR-016), como hace hoy `test_no_rejection_message_can_forge_a_security_log_line`.
 
 ### Adaptación de tests existentes (autorizada en plan.md)
 
-- [ ] T025 [US2] Adaptar el fixture `repo_root` de `tests/test_resolve_ruta.py` para que además fije `LEGALIZE_REPOS_DIR` y `_RAIZ_POR_PAIS[PAIS]` sobre `tmp_path`. Ningún assert cambia; el test del enlace simbólico debe seguir ejecutándose (es el que vigila la CI).
+- [X] T025 [US2] Adaptar el fixture `repo_root` de `tests/test_resolve_ruta.py` para que además fije `LEGALIZE_REPOS_DIR` y `_RAIZ_POR_PAIS[PAIS]` sobre `tmp_path`. Ningún assert cambia; el test del enlace simbólico debe seguir ejecutándose (es el que vigila la CI).
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] En `mcp_legalize.py`:
+- [X] T026 [US2] En `mcp_legalize.py`:
   - leer `LEGALIZE_REPOS_DIR` con valor por defecto `<script_dir>/repos` y resolverlo una sola vez;
   - si no existe o no es un directorio, avisar y no servir ningún índice;
   - añadir `_RAIZ_POR_PAIS`;
   - en `_load_indices`, calcular la raíz como hoy a partir de `directorio_base`, resolverla y exigir `is_relative_to(LEGALIZE_REPOS_DIR)`; si falla, ignorar ese índice con el aviso `[SEGURIDAD]` de [contracts/operador.md](contracts/operador.md) usando `!r`;
   - en `_resolve_ruta`, usar `_RAIZ_POR_PAIS[pais]` en lugar de `_META_POR_PAIS[...]["directorio_base"]` y conservar las demás defensas (FR-006).
-- [ ] T027 [US2] Documentar `LEGALIZE_REPOS_DIR` en el docstring de configuración de `mcp_legalize.py` y en la tabla Configuration de `README.md`, con su valor por defecto exacto, para que `tests/test_config_docs.py` pase. Añadir a Mitigation 3 del README que la raíz la decide el operador y no el índice.
-- [ ] T028 [US2] Ejecutar T023–T025, `tests/test_config_docs.py` y la suite (verdes); hacer commit `fix(security): take the corpus root from the operator, not from the index`.
+- [X] T027 [US2] Documentar `LEGALIZE_REPOS_DIR` en el docstring de configuración de `mcp_legalize.py` y en la tabla Configuration de `README.md`, con su valor por defecto exacto, para que `tests/test_config_docs.py` pase. Añadir a Mitigation 3 del README que la raíz la decide el operador y no el índice.
+- [X] T028 [US2] Ejecutar T023–T025, `tests/test_config_docs.py` y la suite (verdes); hacer commit `fix(security): take the corpus root from the operator, not from the index`.
 
 **Checkpoint**: ningún contenido de índice amplía lo que el servidor puede leer.
 
