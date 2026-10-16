@@ -245,9 +245,19 @@ def test_check_updates_stays_quiet_when_the_rules_match(
             # declarar las de las dos superficies — si no, comprobaría el
             # silencio de una mientras la otra grita.
             "tokenizador": tok.huella(),
+            # Y desde spec 001, sus postings: `check_updates` informa POSTINGS
+            # cuando faltan o son de otra generación. Mismo motivo que el sello
+            # de arriba: sin ellos este test comprobaría el silencio de las
+            # reglas mientras los postings gritan.
+            "generacion": "d" * 32,
         },
         "documentos": {},
     }), encoding="utf-8")
+    import legalize_postings
+    legalize_postings.escribir(
+        legalize_postings.ruta_postings(indices, "legalize-xx"), {},
+        tokenizador=tok.huella(), generacion="d" * 32,
+    )
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)

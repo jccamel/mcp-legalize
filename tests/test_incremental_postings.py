@@ -222,3 +222,51 @@ def test_a_failed_postings_write_leaves_the_json_unstamped(update_index, tmp_pat
     postings, motivo = lp.estado(tmp_path, "tst", tk.huella(), meta.get("generacion"))
     assert motivo is None
     assert postings.docs("arrendamiento") == {"a"}
+
+
+# ───────────── US5: a changed tokenizer stamp forces the rebuild it reports ──
+
+def _alterar_sello(cli, sello="0000deadbeef"):
+    datos = json.loads(cli.indice.read_text(encoding="utf-8"))
+    datos["_meta"]["tokenizador"] = sello
+    cli.indice.write_text(json.dumps(datos), encoding="utf-8")
+
+
+def test_a_stale_tokenizer_stamp_rebuilds_even_with_nothing_changed_on_disk(cli):
+    """US5 scenario 1, the reproduction from the review of 2026-10-16.
+
+    `check_updates.py` reported TOKENS and proposed running the indexer, and the
+    indexer answered "El índice ya está al día" and changed nothing: the warning
+    came back forever. A stamp that is reported has to force what it reports.
+    """
+    escribir(cli.repo, "a.md", "El arrendamiento urbano")
+    escribir(cli.repo, "b.md", "El teletrabajo")
+    cli.indexar()
+    _alterar_sello(cli)
+
+    salida = cli.indexar()
+
+    assert "ya está al día" not in salida
+    assert meta_de(cli)["tokenizador"] == tk.huella()
+    assert postings_de(cli) == {"arrendamiento": {"a"}, "urbano": {"a"}, "teletrabajo": {"b"}}
+
+
+def test_a_stale_tokenizer_stamp_rebuilds_everything_not_only_what_changed(cli):
+    """US5 scenario 2: postings built under old rules cannot be merged with new ones."""
+    escribir(cli.repo, "a.md", "El arrendamiento urbano")
+    escribir(cli.repo, "b.md", "El teletrabajo")
+    cli.indexar()
+    _alterar_sello(cli)
+    # Unos postings viejos de verdad: otra huella en su cabecera y un término
+    # que las reglas actuales no producirían a partir de estos documentos.
+    ruta = lp.ruta_postings(cli.indice.parent, "index")
+    lp.escribir(ruta, {"reliquia": {"a"}, "arrendamiento": {"a"}},
+                tokenizador="0000deadbeef", generacion=meta_de(cli)["generacion"])
+    escribir(cli.repo, "b.md", "El teletrabajo remoto")
+
+    cli.indexar()
+
+    postings = postings_de(cli)
+    assert "reliquia" not in postings
+    assert postings["urbano"] == {"a"}
+    assert postings["remoto"] == {"b"}

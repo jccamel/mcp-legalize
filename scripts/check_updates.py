@@ -14,6 +14,7 @@ Salida de ejemplo:
     [AT] SIN GIT   — repos/legalize-at no es un repositorio git
     [PT] VACÍO     — el repositorio no tiene commits
     [ES] REGLAS    — auditado con 03446b5a64e4, el escáner está en 9f21c0a3e1bb
+    [SE] POSTINGS  — formato_anterior
 
 Comprueba además con qué reglas de escaneo se auditó cada índice. Un índice
 puede estar al día en commits y aun así llevar hallazgos calculados con un
@@ -36,6 +37,7 @@ if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
 
 import legalize_injection  # noqa: E402  (requiere el sys.path de arriba)
+import legalize_postings  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
 import legalize_tokenizer  # noqa: E402  (idem)
 
@@ -115,6 +117,24 @@ def main() -> None:
                           f"el tokenizador está en {huella_tok_actual}")
             print(
                 f"{label} TOKENS    — {motivo}"
+                f"\n           → python scripts/update_index.py --repo {dir_base}"
+            )
+            outdated.append(pais)
+
+        # Los postings son el cuarto estado y tampoco depende de los otros: un
+        # índice al día en commits, reglas y tokenizador puede tener sus
+        # postings ausentes, en el formato anterior o emparejados con otro JSON.
+        # Lo decide `legalize_postings.estado`, lo mismo que consulta el
+        # servidor antes de buscar, así que este informe no puede discrepar de
+        # lo que el servidor va a hacer. El remedio es el mismo comando sin
+        # `--force-all`: el indexador reconstruye solo lo que haga falta.
+        _, motivo_postings = legalize_postings.estado(
+            _INDICES_DIR, index_path.stem.removeprefix("index_"),
+            huella_tok_actual, meta.get("generacion"),
+        )
+        if motivo_postings is not None:
+            print(
+                f"{label} POSTINGS  — {motivo_postings}"
                 f"\n           → python scripts/update_index.py --repo {dir_base}"
             )
             outdated.append(pais)

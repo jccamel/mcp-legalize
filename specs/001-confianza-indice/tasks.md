@@ -260,23 +260,23 @@ con `.venv/bin/python`.
 
 ### Tests for User Story 5 (primero, y verlos fallar)
 
-- [ ] T036 [P] [US5] En `tests/test_incremental_postings.py`:
+- [X] T036 [P] [US5] En `tests/test_incremental_postings.py`:
   - con `_meta.tokenizador` alterado y sin cambios en disco, `update_index.py` reconstruye los postings de **todos** los documentos y no imprime "El índice ya está al día" (escenario 1);
   - con el sello alterado y un fichero modificado, se reconstruye todo y no solo lo modificado (escenario 2).
 
   Hoy el primero falla con "El índice ya está al día", como se reprodujo en el análisis.
-- [ ] T037 [P] [US5] En `tests/test_inverted_index.py` (tests nuevos junto a los de `check_updates`):
+- [X] T037 [P] [US5] En `tests/test_inverted_index.py` (tests nuevos junto a los de `check_updates`):
   - para cada estado caducado (`TOKENS`, el nuevo `POSTINGS` con `.postings` ausente, en formato anterior o con otra generación), ejecutar `check_updates.main()`, después el comando que propone (`update_index.py --repo <dir>`) y otra vez `check_updates.main()`, y comprobar que ese índice deja de aparecer (SC-005, FR-014);
   - con unos postings cuyo sello no coincide con el tokenizador del servidor, `contar_leyes(texto=...)` informa `tokenizador_distinto` (escenario 3).
 
 ### Implementation for User Story 5
 
-- [ ] T038 [US5] En `scripts/update_index.py`, hacer que un sello de tokenizador previo distinto de `legalize_tokenizer.huella()` cuente como postings no utilizables, y por tanto se reconstruyan. Si T019–T021 ya lo cubren mediante `legalize_postings.estado`, este test lo deja fijado. Confirmar que el sello solo se escribe junto con unos postings escritos (FR-015).
-- [ ] T039 [US5] En `scripts/check_updates.py`:
+- [X] T038 [US5] En `scripts/update_index.py`, hacer que un sello de tokenizador previo distinto de `legalize_tokenizer.huella()` cuente como postings no utilizables, y por tanto se reconstruyan. Si T019–T021 ya lo cubren mediante `legalize_postings.estado`, este test lo deja fijado. Confirmar que el sello solo se escribe junto con unos postings escritos (FR-015).
+- [X] T039 [US5] En `scripts/check_updates.py`:
   - añadir el estado `POSTINGS` usando `legalize_postings.estado(...)` con la huella actual y `_meta.generacion`;
   - el aviso nombra el motivo y propone `python scripts/update_index.py --repo <dir_base>`, sin `--force-all`;
   - el índice cuenta como desactualizado una sola vez aunque entre por varios estados.
-- [ ] T040 [US5] Ejecutar T036–T037 y la suite (verdes); hacer commit `fix(index): make a changed tokenizer stamp force the rebuild it reports`.
+- [X] T040 [US5] Ejecutar T036–T037 y la suite (verdes); hacer commit `fix(index): make a changed tokenizer stamp force the rebuild it reports`.
 
 **Checkpoint**: todo estado caducado que se detecta se resuelve con el remedio que se propone.
 
