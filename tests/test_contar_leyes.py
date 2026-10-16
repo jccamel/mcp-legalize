@@ -23,11 +23,13 @@ signal. Closing that needs a breaking change to the response shape, so it waits
 for a major version this project does not yet have.
 """
 
-import pickle
-
 import pytest
 
+import legalize_postings
+import legalize_tokenizer
 import mcp_legalize
+
+GENERACION = "a" * 32
 
 
 def documento(**campos):
@@ -53,12 +55,16 @@ def corpus(tmp_path, monkeypatch):
     postings = {"arrendamiento": [f"DOC-{i}" for i in range(50)]}
     indices = tmp_path / "indices"
     indices.mkdir(parents=True, exist_ok=True)
-    with (indices / "inverted_tst.bin").open("wb") as fh:
-        pickle.dump({"tokenizador": "cafe12345678", "postings": postings}, fh, protocol=5)
+    # Escritos como los deja el indexador: formato sin código, sello real del
+    # tokenizador y la generación que los ata al índice JSON (spec 001).
+    legalize_postings.escribir(
+        legalize_postings.ruta_postings(indices, "tst"), postings,
+        tokenizador=legalize_tokenizer.huella(), generacion=GENERACION,
+    )
 
     monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
     monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {})
+    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {"generacion": GENERACION})
     monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
     monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
     return docs

@@ -13,7 +13,6 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 import argparse
 import json
 import os
-import pickle
 import sys
 import tempfile
 import time
@@ -34,6 +33,7 @@ if str(_PROJECT_DIR) not in sys.path:
 
 import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
 import legalize_injection  # noqa: E402  (idem)
+import legalize_postings  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
 import legalize_tokenizer  # noqa: E402  (idem)
 
@@ -267,16 +267,15 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
     truncados = _truncar_metadatos(entry)
     return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados, terminos
 
-def _ruta_invertido(index_path: Path) -> Path:
-    """El `.bin` que acompaña a un índice JSON.
+def _nombre_repo(index_path: Path) -> str:
+    """El nombre con el que `legalize_postings` localiza los postings de un índice.
 
-    Fichero aparte y no una sección del JSON, por dos razones medidas. Los
-    postings en pickle cargan 8,9x más rápido que su equivalente JSON — pero lo
-    decisivo es que `json.load` no sabe leer una sección suelta: fundirlos
-    obligaría al servidor a parsear 85 MB de postings para llegar a los 8,7 MB
-    de metadatos que necesita al arrancar, y haría imposible la carga perezosa.
+    Fichero aparte y no una sección del JSON: `json.load` no sabe leer una
+    sección suelta, así que fundirlos obligaría al servidor a procesar todos
+    los postings para llegar a los metadatos que necesita al arrancar, y haría
+    imposible la carga perezosa (ADR 0003).
     """
-    return index_path.parent / f"inverted_{index_path.stem.removeprefix('index_')}.bin"
+    return index_path.stem.removeprefix("index_")
 
 def _invertir(terminos_por_doc: dict[str, set[str]]) -> dict[str, list[str]]:
     """De documento->términos a término->documentos.
@@ -291,32 +290,29 @@ def _invertir(terminos_por_doc: dict[str, set[str]]) -> dict[str, list[str]]:
             postings.setdefault(termino, []).append(doc_id)
     return {t: sorted(docs) for t, docs in sorted(postings.items())}
 
-def _write_invertido(index_path: Path, terminos_por_doc: dict[str, set[str]]) -> int:
-    """Escribe el índice invertido y devuelve cuántos términos tiene.
+def _write_invertido(index_path: Path, terminos_por_doc: dict[str, set[str]],
+                     generacion: str) -> int:
+    """Escribe los postings y devuelve cuántos términos tienen.
 
-    Lleva su propia huella del tokenizador además de la que va en el JSON: un
-    `.bin` separado de su índice sigue siendo legible, y tiene que poder decir
-    con qué reglas se construyó sin depender de un fichero que quizá no esté.
+    El formato lo decide `legalize_postings`, no este script: antes esto era un
+    `pickle.dump`, y el servidor lo cargaba con `pickle.load` sobre un fichero
+    que cualquiera con escritura en `indices/` podía sustituir (spec 001).
+
+    Lleva su propia huella del tokenizador y la generación del JSON al que
+    acompaña: unos postings separados de su índice siguen siendo legibles, y
+    tienen que poder decir con qué reglas y para qué índice se construyeron.
+
+    Tras escribirlos, el `.bin` del formato anterior se borra: dejarlo al lado
+    sería un fichero más que alguien podría intentar que se leyera.
     """
-    postings = _invertir(terminos_por_doc)
-    payload = {
-        "tokenizador": legalize_tokenizer.huella(),
-        "postings": postings,
-    }
-    ruta = _ruta_invertido(index_path)
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=ruta.parent, suffix=".tmp", prefix=".inverted_")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            pickle.dump(payload, fh, protocol=5)
-        os.replace(tmp_path, ruta)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-    return len(postings)
+    nombre = _nombre_repo(index_path)
+    n = legalize_postings.escribir(
+        legalize_postings.ruta_postings(index_path.parent, nombre),
+        _invertir(terminos_por_doc),
+        tokenizador=legalize_tokenizer.huella(), generacion=generacion,
+    )
+    legalize_postings.ruta_formato_anterior(index_path.parent, nombre).unlink(missing_ok=True)
+    return n
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -745,6 +741,10 @@ def main() -> None:
     # reglas que ya no existen, y sin este sello no hay forma de distinguirlas
     # de las buenas salvo reconstruyendo a ciegas.
     meta_idx["tokenizador"] = legalize_tokenizer.huella()
+    # Ata estos postings a este JSON: el servidor no usa unos postings cuya
+    # generación no coincide con la del índice que los acompaña (spec 001).
+    generacion = legalize_postings.nueva_generacion()
+    meta_idx["generacion"] = generacion
 
     print(f"\nEscribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
     try:
@@ -756,7 +756,7 @@ def main() -> None:
 
     print("Escribiendo índice invertido …", end=" ", flush=True)
     try:
-        n_terminos = _write_invertido(index_path, terminos_por_doc)
+        n_terminos = _write_invertido(index_path, terminos_por_doc, generacion)
         print("OK")
     except Exception as exc:
         # El índice JSON ya está escrito y es utilizable sin el invertido: la

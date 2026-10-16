@@ -2,7 +2,8 @@
 
 The indexer already reads every document to scan it for injection patterns. This
 adds a second use of that same read: collecting the terms each document contains,
-and writing them to `inverted_<repo>.bin` beside the JSON index.
+and writing them to `inverted_<repo>.postings` beside the JSON index (a pickle
+`.bin` until spec 001 replaced it with a format that cannot run code).
 
 **Built here and never at server startup.** Measured while scoping #31: ~9
 minutes for the Spanish corpus. Doing that at boot would turn a 2.67 s start into
@@ -21,7 +22,6 @@ index was built is not enough if nothing records *with what*.
 """
 
 import json
-import pickle
 
 import pytest
 
@@ -51,12 +51,22 @@ def escribir(directorio, nombre, cuerpo, titulo="Ley de prueba"):
 
 
 def leer_invertido(indice_path):
-    """El `.bin` que acompaña a un índice JSON."""
-    ruta = indice_path.parent / f"inverted_{indice_path.stem.removeprefix('index_')}.bin"
+    """Los postings que acompañan a un índice JSON, con la forma de siempre.
+
+    Leídos con `legalize_postings`, el único lector del formato (spec 001). La
+    forma devuelta es la que estos tests ya usaban, para que ningún assert cambie.
+    """
+    import legalize_postings
+
+    ruta = legalize_postings.ruta_postings(
+        indice_path.parent, indice_path.stem.removeprefix("index_"))
     if not ruta.exists():
         return None
-    with ruta.open("rb") as fh:
-        return pickle.load(fh)
+    leidos = legalize_postings.leer(ruta)
+    return {
+        "tokenizador": leidos.tokenizador,
+        "postings": {t: leidos.docs(t) for t in leidos.terminos()},
+    }
 
 
 # ────────────────────────────── construcción ─────────────────────────────────
@@ -139,7 +149,7 @@ def test_the_tokenizer_fingerprint_is_stamped(indexar):
 
 
 def test_the_inverted_file_carries_the_same_fingerprint(indexar):
-    """The `.bin` must be self-describing: a file separated from its JSON is
+    """The postings must be self-describing: a file separated from its JSON is
     still readable, and must still say what built it."""
     escribir(indexar.repo / "test", "a.md", "El arrendamiento urbano")
 
@@ -224,3 +234,26 @@ def test_check_updates_stays_quiet_when_the_tokenizer_matches(check_updates, tmp
     reportado = capsys.readouterr().out
     assert "TOKENS" not in reportado
     assert "Todos los índices están al día" in reportado
+
+
+# ──────────────────────── the code-free format (spec 001, US3) ───────────────
+
+def test_the_indexer_writes_the_code_free_format_and_drops_the_old_bin(indexar):
+    """The postings are `.postings`, readable by `legalize_postings`; the pickle goes.
+
+    A leftover `.bin` beside the new file would be one more file a server could
+    be tricked into reading, so the indexer deletes it once the replacement is
+    safely on disk.
+    """
+    import legalize_postings as lp
+
+    escribir(indexar.repo / "test", "a.md", "El arrendamiento urbano")
+    nombre = indexar.indice.stem.removeprefix("index_")
+    viejo = lp.ruta_formato_anterior(indexar.indice.parent, nombre)
+    viejo.write_bytes(b"\x80\x05 restos de una version anterior")
+
+    indexar()
+
+    assert not viejo.exists()
+    leidos = lp.leer(lp.ruta_postings(indexar.indice.parent, nombre))
+    assert leidos.docs("arrendamiento")
