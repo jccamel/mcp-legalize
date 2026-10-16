@@ -215,13 +215,27 @@ Absolute paths are required in both clients.
 | `obtener_ley` | Full text and metadata of one law |
 | `obtener_articulo` | A single article, located by number. Recognises Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`) |
 | `listar_rangos` | Available norm types with their frequency |
-| `contar_leyes` | How many laws match, without returning them. Takes the same filters as `buscar_ley` |
+| `contar_leyes` | How many laws match, without returning them, and in which countries full-text search could not run. Takes the same filters as `buscar_ley` |
 | `estadisticas` | Global metrics of the loaded datasets |
 
 `buscar_ley` truncates at `limite` without saying so, and results are in corpus
 order rather than ranked by relevance — so the first hundred of a thousand are
 arbitrary. `contar_leyes` is how a client tells *"these are the 24 laws"* from
 *"these are 100 of 1,092, in no particular order"*.
+
+It is also how a client tells *"no law contains these words"* from *"nobody
+looked"*. Full-text search needs a country's postings, and a country can be
+without usable ones — never indexed, unreadable, built by another tokenizer, or
+in the old pickle format. `contar_leyes` lists every such country in
+`sin_consultar`, with the reason. `buscar_ley` keeps returning a list while at
+least one requested country could be searched, and returns an error naming the
+countries only when none could — before, it returned `[]`, the same answer as
+a search with no matches.
+
+```
+Conteo           { total: int, sin_consultar: list[PaisNoConsultado] }
+PaisNoConsultado { pais: str, motivo: str }
+```
 
 ### Error contract
 

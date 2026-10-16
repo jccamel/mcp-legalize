@@ -163,24 +163,42 @@ def test_the_inverted_index_is_loaded_once(corpus, monkeypatch):
     assert cargas == ["tst"]
 
 
-def test_a_country_without_an_inverted_index_degrades_to_no_results(corpus, monkeypatch):
-    """A corpus indexed before part 2, or whose `.bin` failed to write.
+def test_a_country_without_an_inverted_index_says_it_could_not_search(corpus, monkeypatch):
+    """A corpus indexed before part 2, or whose postings failed to write.
 
-    Returning an error would make one missing file break a tool for every
-    country. Returning nothing says truthfully that no document is known to
-    contain those terms in a corpus that cannot answer the question.
+    This test used to expect `[]`, on the reasoning that an empty list "says
+    truthfully that no document is known to contain those terms". It does not
+    say that to a client: `[]` is also exactly what a search with no matches
+    returns, so the client concluded "no law contains these words" when nobody
+    had looked (spec 001, FR-010; decision Q3, approved 2026-10-16).
+
+    The other half of the old reasoning still holds and is kept: one country
+    without postings must not break the tool for the others. That is why this
+    is an error only when the search was limited to the country that cannot
+    answer — searching every country still returns the others' results.
     """
     monkeypatch.setattr(mcp_legalize, "INDICES_DIR", corpus and mcp_legalize.INDICES_DIR.parent / "vacio")
 
-    assert mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento") == []
+    resultado = mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
+
+    assert isinstance(resultado, mcp_legalize.ErrorRespuesta)
+    assert "tst: sin_postings" in resultado.sugerencias
 
 
-def test_a_corrupt_inverted_index_degrades_instead_of_raising(corpus, tmp_path, monkeypatch):
-    """The `.bin` is untrusted input like the JSON index — #18's lesson."""
+def test_a_corrupt_inverted_index_is_reported_instead_of_raising(corpus, tmp_path, monkeypatch):
+    """The postings are untrusted input like the JSON index — #18's lesson.
+
+    Still never an exception. What changed (spec 001, FR-010; approved
+    2026-10-16) is that the answer is no longer `[]`, which a client cannot tell
+    from "no matches": it is an error naming the country and why.
+    """
     (mcp_legalize.INDICES_DIR / "inverted_tst.postings").write_bytes(b"no soy unos postings")
     monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
 
-    assert mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento") == []
+    resultado = mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
+
+    assert isinstance(resultado, mcp_legalize.ErrorRespuesta)
+    assert "tst: ilegibles" in resultado.sugerencias
 
 
 # ──────────────────────── no code execution (spec 001, US3) ───────────────────
