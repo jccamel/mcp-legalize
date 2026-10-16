@@ -1,4 +1,7 @@
+# Secrets (only .env.example is versioned)
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.pyc
@@ -14,3 +17,7 @@ indices/*
 !indices/.gitkeep
 !indices/index_legalize-mock.json
 .pytest_cache/
+
+# MAD-OS / Claude Code: filtered test logs and per-machine settings
+.claude/logs/
+.claude/settings.local.json
