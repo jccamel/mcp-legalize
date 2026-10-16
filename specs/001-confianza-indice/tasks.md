@@ -216,7 +216,7 @@ con `.venv/bin/python`.
 
 ### Tests for User Story 4 (primero, y verlos fallar)
 
-- [ ] T029 [P] [US4] Crear `tests/test_text_search_availability.py` con dos países sintéticos (`ok`, que tiene postings, y `sin`, que no). Cubrir:
+- [X] T029 [P] [US4] Crear `tests/test_text_search_availability.py` con dos países sintéticos (`ok`, que tiene postings, y `sin`, que no). Cubrir:
   - `contar_leyes.fn(texto=...)` → `total` del país `ok` y `sin_consultar == [PaisNoConsultado(pais="sin", motivo="sin_postings")]`;
   - con todos los países disponibles, `sin_consultar == []`;
   - sin `texto`, `sin_consultar == []` aunque falten postings;
@@ -224,29 +224,29 @@ con `.venv/bin/python`.
   - `buscar_ley.fn(texto=...)` sin país devuelve una lista con los resultados de `ok`;
   - `texto="de la"` (sin términos de 3 o más caracteres) → `ErrorRespuesta` en `buscar_ley` y motivo `consulta_sin_terminos` en `contar_leyes`;
   - los motivos posibles son exactamente los del contrato.
-- [ ] T030 [P] [US4] En `tests/test_text_search_availability.py`, un test de FR-012: para un conjunto fijo de consultas, el conjunto de países no consultados según `contar_leyes` coincide con el que se deduce de `buscar_ley`. Las dos salen de `_filtrar_docs`, así que el assert va sobre las herramientas.
-- [ ] T031 [US4] Verificar que `tests/test_contar_leyes.py::test_buscar_ley_still_returns_a_bare_list` sigue pasando sin cambios: es el contrato de lista que Q3 protege.
+- [X] T030 [P] [US4] En `tests/test_text_search_availability.py`, un test de FR-012: para un conjunto fijo de consultas, el conjunto de países no consultados según `contar_leyes` coincide con el que se deduce de `buscar_ley`. Las dos salen de `_filtrar_docs`, así que el assert va sobre las herramientas.
+- [X] T031 [US4] Verificar que `tests/test_contar_leyes.py::test_buscar_ley_still_returns_a_bare_list` sigue pasando sin cambios: es el contrato de lista que Q3 protege.
 
 ### Cambio de tests existentes (aprobado por el usuario el 2026-10-16)
 
-- [ ] T032 [US4] En `tests/test_full_text_search.py`, cambiar `test_a_country_without_an_inverted_index_degrades_to_no_results` y `test_a_corrupt_inverted_index_degrades_instead_of_raising` para que esperen `ErrorRespuesta` con el país y el motivo (`sin_postings` e `ilegibles`), y conserven que no se lanza ninguna excepción. Reescribir los docstrings explicando que `[]` era indistinguible de "sin coincidencias" (FR-010, Q3) y renombrar los tests en consecuencia. Verlos fallar antes de T033.
+- [X] T032 [US4] En `tests/test_full_text_search.py`, cambiar `test_a_country_without_an_inverted_index_degrades_to_no_results` y `test_a_corrupt_inverted_index_degrades_instead_of_raising` para que esperen `ErrorRespuesta` con el país y el motivo (`sin_postings` e `ilegibles`), y conserven que no se lanza ninguna excepción. Reescribir los docstrings explicando que `[]` era indistinguible de "sin coincidencias" (FR-010, Q3) y renombrar los tests en consecuencia. Verlos fallar antes de T033.
 
 ### Implementation for User Story 4
 
-- [ ] T033 [US4] En `mcp_legalize.py`:
+- [X] T033 [US4] En `mcp_legalize.py`:
   - añadir el modelo `PaisNoConsultado(pais: str, motivo: str)` y `Conteo.sin_consultar: list[PaisNoConsultado] = []`;
   - hacer que `_filtrar_docs` (o una función que compartan `buscar_ley` y `contar_leyes`) calcule los países no consultados con sus motivos de `_INVERTIDO_POR_PAIS`, más `consulta_sin_terminos` cuando `legalize_tokenizer.tokens(texto)` está vacío;
   - `contar_leyes` rellena `sin_consultar`;
   - `buscar_ley` devuelve `ErrorRespuesta(error=..., sugerencias=["<pais>: <motivo>", ...])` solo si no se pudo consultar ningún país pedido o si la consulta no tiene términos, y en otro caso la lista de siempre.
 
   Los códigos de país pasan por `_sanitize_metadata`.
-- [ ] T034 [US4] En `mcp_legalize.py`:
+- [X] T034 [US4] En `mcp_legalize.py`:
   - añadir `contar_leyes` a la lista de herramientas de las instrucciones de `FastMCP(...)`, junto con la frase de que la forma de saber si una búsqueda por texto fue completa es contar con los mismos filtros;
   - actualizar el docstring de `buscar_ley`, que hoy dice "si no lo tiene, no devuelve resultados";
   - corregir "las otras cinco herramientas" en el docstring de `obtener_articulo`.
 
   Actualizar la Tool reference de `README.md` para que `tests/test_readme_claims.py` siga en verde.
-- [ ] T035 [US4] Ejecutar T029–T032 y la suite (verdes); hacer commit `fix: tell the client when full-text search could not run`.
+- [X] T035 [US4] Ejecutar T029–T032 y la suite (verdes); hacer commit `fix: tell the client when full-text search could not run`.
 
 **Checkpoint**: "no se pudo buscar" y "cero coincidencias" ya no se confunden.
 

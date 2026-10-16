@@ -126,6 +126,16 @@ class ArticuloResultado(BaseModel):
     posicion_caracter: Optional[int] = None
     error: Optional[str] = None
 
+class PaisNoConsultado(BaseModel):
+    """Un país donde la búsqueda por texto no se pudo hacer, y por qué.
+
+    `motivo` es uno de los de `legalize_postings.MOTIVOS` o
+    `consulta_sin_terminos`, cuando ningún término de la consulta llega a la
+    longitud mínima del tokenizador.
+    """
+    pais: str
+    motivo: str
+
 class Conteo(BaseModel):
     """Cuántos documentos cumplen unos filtros, sin traerlos.
 
@@ -133,8 +143,16 @@ class Conteo(BaseModel):
     primeros N son arbitrarios: orden del corpus, no relevancia. Un cliente que
     recibe 100 de 1.092 sin señal de que faltan 992 razona como si hubiera visto
     la respuesta entera.
+
+    `sin_consultar` es la otra mitad de esa pregunta. Sin postings utilizables,
+    una búsqueda por texto devolvía lo mismo que una sin coincidencias, y "nadie
+    miró" se leía como "ninguna ley lo dice" (spec 001, US4). Aquí se listan los
+    países pedidos donde la búsqueda por texto no pudo hacerse, con el motivo, y
+    va vacía cuando se pudo en todos. `total` cuenta lo que sí se consultó, así
+    que quien no mire este campo obtiene la misma cifra de siempre.
     """
     total: int
+    sin_consultar: list[PaisNoConsultado] = []
 
 class RangoConteo(BaseModel):
     rango: str
@@ -768,6 +786,23 @@ def _docs_con_texto(pais: str, consulta: str) -> set[str] | None:
         return None
     return {postings.ids[i] for i in encontrados}
 
+# Motivo propio de la consulta, no de los postings: ningún término llega a la
+# longitud mínima del tokenizador.
+CONSULTA_SIN_TERMINOS = "consulta_sin_terminos"
+
+def _motivo_sin_texto(pais: str) -> str:
+    """Por qué no se pudo buscar por texto en un país ya intentado.
+
+    Sale del estado guardado al cargar sus postings o, si se cargaron bien pero
+    una lista resultó corrupta al decodificarla, del propio objeto.
+    """
+    postings, motivo = _INVERTIDO_POR_PAIS.get(pais, (None, legalize_postings.SIN_POSTINGS))
+    if motivo:
+        return motivo
+    if postings is not None and postings.motivo:
+        return postings.motivo
+    return legalize_postings.SIN_POSTINGS
+
 def _iter_docs(pais: str = ""):
     if pais and pais in _DOCS_POR_PAIS:
         for doc_id, doc in _DOCS_POR_PAIS[pais].items():
@@ -823,11 +858,19 @@ Servidor de legislación bajo el estándar Legalize (multipaís).
 
 Herramientas disponibles:
 - listar_paises: jurisdicciones disponibles e info del corpus.
-- buscar_ley: buscar leyes por título, rango, estado, país.
+- buscar_ley: buscar leyes por título, texto del cuerpo, rango, estado, país.
+- contar_leyes: cuántas leyes cumplen los mismos filtros que buscar_ley, sin
+  devolverlas, y en qué países no se pudo buscar por texto.
 - obtener_ley: lee el contenido de una ley.
 - obtener_articulo: extrae el texto de un artículo específico de una ley.
 - listar_rangos: rangos (tipos de norma) disponibles con conteos.
 - estadisticas: información general del dataset.
+
+Resultados parciales: buscar_ley corta en `limite` y no ordena por relevancia.
+Para saber si lo que devolvió es todo, llama a contar_leyes con los mismos
+filtros: `total` dice cuántas hay y `sin_consultar` en qué países la búsqueda por
+texto no pudo hacerse. Si buscar_ley no puede buscar por texto en ninguno de los
+países pedidos, devuelve un error en lugar de una lista vacía.
 
 Errores: cuando una herramienta no puede devolver nada, responde con
 ErrorRespuesta {error, sugerencias?}. `sugerencias` viene rellena cuando hay
@@ -873,8 +916,18 @@ def _filtrar_docs(
     jurisdiccion: str, departamento: str, fecha_desde: str, fecha_hasta: str,
     derogada_desde: str, derogada_hasta: str,
     actualizada_desde: str, actualizada_hasta: str,
+    sin_consultar: list | None = None,
 ):
-    """Genera (pais_code, doc_id, doc) para cada documento que pasa los filtros."""
+    """Genera (pais_code, doc_id, doc) para cada documento que pasa los filtros.
+
+    Si se pasa `sin_consultar`, se rellena con `(pais, motivo)` por cada país
+    pedido donde la búsqueda por texto no pudo hacerse. Lo decide este mismo
+    generador y no cada herramienta por su cuenta, para que `buscar_ley` y
+    `contar_leyes` no puedan describir consultas distintas (FR-012). Se rellena
+    antes del primer documento, así que vale aunque quien itera corte pronto.
+    """
+    if sin_consultar is None:
+        sin_consultar = []
     q_norm            = _normalize(consulta)     if consulta     else ""
     rango_norm        = _normalize(rango)        if rango        else ""
     estado_norm       = _normalize(estado)       if estado       else ""
@@ -895,10 +948,17 @@ def _filtrar_docs(
     ids_texto = None
     if texto:
         paises = [pais] if pais else list(_DOCS_POR_PAIS)
+        # Una consulta sin ningún término buscable no se ha buscado en ningún
+        # sitio, y decir "cero coincidencias" sería mentir (FR-011).
+        if not legalize_tokenizer.tokens(texto):
+            sin_consultar.extend((codigo, CONSULTA_SIN_TERMINOS) for codigo in paises)
+            return
         ids_texto = set()
         for codigo in paises:
             encontrados = _docs_con_texto(codigo, texto)
-            if encontrados:
+            if encontrados is None:
+                sin_consultar.append((codigo, _motivo_sin_texto(codigo)))
+            elif encontrados:
                 ids_texto |= {(codigo, doc_id) for doc_id in encontrados}
         if not ids_texto:
             return
@@ -938,6 +998,30 @@ def _filtrar_docs(
 
         yield pais_code, doc_id, doc
 
+def _error_sin_texto(sin_consultar: list, pais: str) -> "ErrorRespuesta | None":
+    """El error de `buscar_ley` cuando la búsqueda por texto no se hizo en ningún país pedido.
+
+    Los códigos de país pasan por `_sanitize_metadata`: salen del índice.
+    """
+    if not sin_consultar:
+        return None
+    pedidos = {pais} if pais else set(_DOCS_POR_PAIS)
+    if {codigo for codigo, _ in sin_consultar} != pedidos:
+        return None
+    sugerencias = [f"{_sanitize_metadata(codigo, max_len=50)}: {motivo}"
+                   for codigo, motivo in sin_consultar]
+    if all(motivo == CONSULTA_SIN_TERMINOS for _, motivo in sin_consultar):
+        return ErrorRespuesta(
+            error="La consulta de texto no tiene términos buscables: ninguno llega a "
+                  "tres caracteres. No se ha buscado nada.",
+            sugerencias=sugerencias,
+        )
+    return ErrorRespuesta(
+        error="La búsqueda por texto no está disponible en los países pedidos; "
+              "no es que no haya coincidencias. Motivo en `sugerencias`.",
+        sugerencias=sugerencias,
+    )
+
 @mcp.tool()
 def buscar_ley(
     consulta: str = "",
@@ -962,8 +1046,12 @@ def buscar_ley(
 
     - consulta: texto libre contra el título.
     - texto: términos que deben aparecer en el CUERPO de la ley. Devuelve los
-      documentos que contienen todos ellos, sin importar el orden. Requiere que
-      el corpus tenga índice invertido; si no lo tiene, no devuelve resultados.
+      documentos que contienen todos ellos, sin importar el orden. Los términos
+      de menos de tres caracteres se ignoran. En un país sin índice invertido
+      utilizable no se puede buscar por texto: si eso pasa en todos los países
+      pedidos, devuelve ErrorRespuesta con el motivo; si pasa solo en algunos,
+      devuelve los resultados de los demás, y `contar_leyes` con los mismos
+      filtros lista los que faltan en `sin_consultar`.
     - pais: código ISO (es, se, at, de, fr…).
     - rango: tipo de norma (ley, forordning, Verordnung…).
     - estado: in_force, repealed, partially_repealed, annulled, expired.
@@ -995,10 +1083,11 @@ def buscar_ley(
 
     resultados = []
     skipped = 0
+    sin_consultar: list = []
     for pais_code, doc_id, doc in _filtrar_docs(
         consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
         fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta,
+        actualizada_desde, actualizada_hasta, sin_consultar,
     ):
         if skipped < offset:
             skipped += 1
@@ -1007,7 +1096,13 @@ def buscar_ley(
         if len(resultados) >= limite:
             break
 
-    return resultados
+    # La lista se conserva mientras se haya podido buscar en al menos un país
+    # pedido: 16 llamadas dependen de que esto sea una lista, y un país sin
+    # postings no puede esconder los resultados de los demás (decisión Q3). Si
+    # no se pudo buscar en ninguno, `[]` diría "ninguna ley lo contiene" cuando
+    # nadie miró, así que es un error que dice dónde y por qué.
+    error = _error_sin_texto(sin_consultar, pais)
+    return error if error is not None else resultados
 
 @mcp.tool()
 def contar_leyes(
@@ -1048,11 +1143,16 @@ def contar_leyes(
 
     # Mismo generador que `buscar_ley`, para que el conteo no pueda describir
     # una consulta distinta de la que el cliente va a ejecutar después.
-    return Conteo(total=sum(1 for _ in _filtrar_docs(
+    sin_consultar: list = []
+    total = sum(1 for _ in _filtrar_docs(
         consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
         fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta,
-    )))
+        actualizada_desde, actualizada_hasta, sin_consultar,
+    ))
+    return Conteo(total=total, sin_consultar=[
+        PaisNoConsultado(pais=_sanitize_metadata(codigo, max_len=50), motivo=motivo)
+        for codigo, motivo in sin_consultar
+    ])
 
 @mcp.tool()
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
@@ -1096,7 +1196,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     - ErrorRespuesta      no se pudo hacer nada. Sin índices, o la ley no existe
                           o es ambigua. Es la misma forma que devuelven las otras
-                          cinco herramientas.
+                          seis herramientas.
     - ArticuloResultado   con `error` relleno: la ley SÍ se encontró y el
                           artículo no. Eso no es un fallo sin más — `id`, `pais`
                           y `titulo` son información real, y perderla obligaría
@@ -1105,7 +1205,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     Antes los tres casos volvían anidados, así que el cliente tenía que
     inspeccionar un campo opcional para saber si había fallado algo, mientras
-    que con las otras cinco herramientas le bastaba el tipo.
+    que con las otras seis herramientas le bastaba el tipo.
     """
     if not _DOCS_POR_PAIS:
         return ErrorRespuesta(error="No hay índices disponibles.")
