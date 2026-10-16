@@ -45,8 +45,8 @@ con `.venv/bin/python`.
 
 **Purpose**: dejar la línea base verificada antes de tocar nada.
 
-- [ ] T001 Ejecutar `.venv/bin/python -m pytest -rs` y `.venv/bin/python scripts/update_index.py --self-test`; confirmar que la suite está verde con exactamente los 2 skips de Windows y anotar el número de tests (hoy 385) como línea base en `specs/001-confianza-indice/tasks.md` (sección Notes)
-- [ ] T002 [P] Añadir `!indices/inverted_legalize-mock.postings` a `.gitignore` junto a la excepción existente `!indices/index_legalize-mock.json`, para que el mock pueda versionar sus postings (plan, Project Structure)
+- [X] T001 Ejecutar `.venv/bin/python -m pytest -rs` y `.venv/bin/python scripts/update_index.py --self-test`; confirmar que la suite está verde con exactamente los 2 skips de Windows y anotar el número de tests (hoy 385) como línea base en `specs/001-confianza-indice/tasks.md` (sección Notes)
+- [X] T002 [P] Añadir `!indices/inverted_legalize-mock.postings` a `.gitignore` junto a la excepción existente `!indices/index_legalize-mock.json`, para que el mock pueda versionar sus postings (plan, Project Structure)
 
 ---
 
@@ -59,13 +59,13 @@ con `.venv/bin/python`.
 
 ### Tests (escribir primero y verlos fallar: el módulo no existe)
 
-- [ ] T003 Crear `tests/test_postings_format.py` con tests que escriben con `legalize_postings.escribir` y leen con `legalize_postings.leer`:
+- [X] T003 Crear `tests/test_postings_format.py` con tests que escriben con `legalize_postings.escribir` y leen con `legalize_postings.leer`:
   - una ida y vuelta conserva término → conjunto de ids;
   - el fichero empieza exactamente por las líneas `legalize-postings 1`, `tokenizador <huella>`, `generacion <32 hex>` y `documentos <N>`, seguidas de N líneas de ids y de una línea `<término>\t<d1>,<d2>,…` por término "en orden lexicográfico";
   - el primer delta es el índice y cada uno de los siguientes es "≥ 1";
   - dos escrituras del mismo contenido con la misma generación son idénticas byte a byte;
   - leer no decodifica ninguna lista hasta que se consulta un término (se cuenta con un espía, no con tiempo).
-- [ ] T004 En `tests/test_postings_format.py`, un test parametrizado por cada regla de validación de [data-model.md](data-model.md). Cada caso debe dar el motivo `ilegibles` sin lanzar excepción:
+- [X] T004 En `tests/test_postings_format.py`, un test parametrizado por cada regla de validación de [data-model.md](data-model.md). Cada caso debe dar el motivo `ilegibles` sin lanzar excepción:
   - "la primera línea no es exactamente `legalize-postings 1`";
   - "faltan cabeceras o `N` no es un entero no negativo";
   - "hay menos de `N` líneas de ids o algún id está vacío";
@@ -73,7 +73,7 @@ con `.venv/bin/python`.
   - "un delta no es entero, es menor que 1 (o que 0 en el primero), o la suma acumulada llega a `N` o más".
 
   Incluir un fichero binario arbitrario y uno vacío.
-- [ ] T005 En `tests/test_postings_format.py`, tests de `legalize_postings.estado(...)` que cubren los cinco motivos y su orden de evaluación, en el que gana el primero que se cumple:
+- [X] T005 En `tests/test_postings_format.py`, tests de `legalize_postings.estado(...)` que cubren los cinco motivos y su orden de evaluación, en el que gana el primero que se cumple:
   - "`formato_anterior` → existe `inverted_<repo>.bin` y no existe `.postings`";
   - "`sin_postings` → no existe ninguno";
   - "`ilegibles`";
@@ -81,11 +81,11 @@ con `.venv/bin/python`.
   - "`generacion_distinta` → la generación de la cabecera ≠ la del JSON, o el JSON no la tiene".
 
   Añadir también el caso utilizable (motivo `None`).
-- [ ] T006 En `tests/test_postings_format.py`, test de seguridad (SC-003): con `inverted_x.bin` presente y sin `.postings`, `estado` devuelve `formato_anterior` **sin abrir el `.bin`**. Comprobarlo parcheando `open`/`Path.open`/`Path.read_bytes` para que fallen si se llaman con esa ruta, y escribiendo en el `.bin` un pickle que, si se deserializara, crearía un fichero centinela en `tmp_path`; el centinela no debe existir. Añadir un test que verifique que `legalize_postings` no importa `pickle` ni `mcp_legalize`.
+- [X] T006 En `tests/test_postings_format.py`, test de seguridad (SC-003): con `inverted_x.bin` presente y sin `.postings`, `estado` devuelve `formato_anterior` **sin abrir el `.bin`**. Comprobarlo parcheando `open`/`Path.open`/`Path.read_bytes` para que fallen si se llaman con esa ruta, y escribiendo en el `.bin` un pickle que, si se deserializara, crearía un fichero centinela en `tmp_path`; el centinela no debe existir. Añadir un test que verifique que `legalize_postings` no importa `pickle` ni `mcp_legalize`.
 
 ### Implementación
 
-- [ ] T007 Crear `legalize_postings.py` con docstring de módulo en español que explique por qué existe (R1, R6) y con:
+- [X] T007 Crear `legalize_postings.py` con docstring de módulo en español que explique por qué existe (R1, R6) y con:
   - `escribir(ruta, postings: dict[str, set[str]], tokenizador: str, generacion: str)`: atómica, con fichero temporal en el mismo directorio y `os.replace`;
   - `leer(ruta)`: devuelve un objeto con `tokenizador`, `generacion`, la tabla de ids y la consulta perezosa por término a un `set[str]` de ids, o lanza `ValueError` con el motivo;
   - `estado(directorio, nombre_repo, huella_tokenizador_esperada, generacion_json) -> (postings | None, motivo | None)`, con los motivos exactos `formato_anterior`, `sin_postings`, `ilegibles`, `tokenizador_distinto` y `generacion_distinta`;
@@ -93,7 +93,7 @@ con `.venv/bin/python`.
   - `nueva_generacion()`, que devuelve 32 hex de `secrets.token_hex(16)`.
 
   El módulo solo usa la biblioteca estándar, no importa `pickle`, `mcp_legalize` ni `legalize_tokenizer` (la huella llega como parámetro) y nunca abre un `.bin`. Un error de decodificación perezosa deja ese objeto marcado como `ilegibles` para el resto del proceso (data-model).
-- [ ] T008 Ejecutar `tests/test_postings_format.py` (verde), la suite completa y `tests/test_prose_style.py`; hacer commit `feat: add legalize_postings, a code-free format for the inverted index` contando en el cuerpo los fallos observados en T003–T006.
+- [X] T008 Ejecutar `tests/test_postings_format.py` (verde), la suite completa y `tests/test_prose_style.py`; hacer commit `feat: add legalize_postings, a code-free format for the inverted index` contando en el cuerpo los fallos observados en T003–T006.
 
 **Checkpoint**: el formato existe y está probado; servidor e indexador siguen como estaban.
 
@@ -369,7 +369,8 @@ cierran los silencios que quedarían después.
 
 ## Notes
 
-- Línea base (T001): _pendiente_
+- Línea base (T001, 2026-10-16): 383 passed, 2 skipped (385), self-test OK con 24 patrones, huella del cuerpo 03446b5a64e4.
+- Carga de `.postings` del corpus español con validación de términos (T007): 0,24 s, presupuesto 0,36 s. `docs("articulo")`: 2,7 ms.
 - Mediciones SC-006 / SC-007 / RSS (T022, T044): _pendiente_
 - Los números de corpus del README (12.291 documentos, 8,7 MB, ~85 MB) están desactualizados
   (hoy son 25.889, 19,5 MB y 142 MB), pero corregirlos queda fuera de esta spec. Conviene abrir
