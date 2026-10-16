@@ -139,32 +139,32 @@ con `.venv/bin/python`.
 
 ### Tests for User Story 1 (primero, y verlos fallar)
 
-- [ ] T016 [US1] Crear `tests/test_incremental_postings.py` con un corpus sintético en `tmp_path` (al menos 4 documentos) y el indexador ejecutado de verdad (`main()` con `sys.argv` parcheado o en un subproceso). Cubrir los escenarios 1–4 de US1:
+- [X] T016 [US1] Crear `tests/test_incremental_postings.py` con un corpus sintético en `tmp_path` (al menos 4 documentos) y el indexador ejecutado de verdad (`main()` con `sys.argv` parcheado o en un subproceso). Cubrir los escenarios 1–4 de US1:
   - modificar B conserva A en los postings;
   - quitar un término de B lo retira solo de B;
   - un documento que pasa a cuarentena desaparece de los postings;
   - un huérfano retirado con `--remove-orphans` desaparece.
 
   El escenario 1 debe fallar hoy con el defecto reproducido en el análisis.
-- [ ] T017 [US1] En `tests/test_incremental_postings.py`, el test de propiedad de SC-001: tras una secuencia fija de altas, bajas, modificaciones, renombrados de `identificador` y duplicados, los postings incrementales son iguales a los de una pasada `--force-all` sobre el mismo disco.
-- [ ] T018 [US1] En `tests/test_incremental_postings.py`, los casos de escenario 5 y de borde:
+- [X] T017 [US1] En `tests/test_incremental_postings.py`, el test de propiedad de SC-001: tras una secuencia fija de altas, bajas, modificaciones, renombrados de `identificador` y duplicados, los postings incrementales son iguales a los de una pasada `--force-all` sobre el mismo disco.
+- [X] T018 [US1] En `tests/test_incremental_postings.py`, los casos de escenario 5 y de borde:
   - con el JSON al día y el `.postings` borrado, el indexador reconstruye y no imprime "El índice ya está al día";
   - un `.postings` con otra generación provoca una reconstrucción;
   - si la escritura del `.postings` falla (`legalize_postings.escribir` parcheado para lanzar), el JSON queda sin `generacion` ni `tokenizador`, y la pasada siguiente reconstruye.
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] En `scripts/update_index.py`, antes del bucle de pendientes, obtener `legalize_postings.estado(...)` de los postings previos con la huella actual y la `generacion` previa del JSON.
+- [X] T019 [US1] En `scripts/update_index.py`, antes del bucle de pendientes, obtener `legalize_postings.estado(...)` de los postings previos con la huella actual y la `generacion` previa del JSON.
   - **Si son utilizables (FUSIONAR):** cargarlos como conjuntos y retirar los ids de los documentos reprocesados, de los puestos en cuarentena, de los renombrados (`old_doc_id != doc_id`) y de los huérfanos retirados.
   - **Si no lo son (RECONSTRUIR):** marcar que hay que tokenizar todos los documentos que queden en el JSON, incluidos los que no cambiaron en disco.
 
   Seguir el diagrama de transiciones de [data-model.md](data-model.md).
-- [ ] T020 [US1] En `scripts/update_index.py`, implementar la reconstrucción: tokenizar con `legalize_tokenizer.tokens_de_documento` cada documento del JSON que no se haya procesado en la pasada, leyendo su `_ruta` desde `repo_dir`, y sin superar el pico de RSS actual. Lo que se guarda por documento es un conjunto de términos; liberar cada uno en cuanto se vuelca a los postings.
-- [ ] T021 [US1] En `scripts/update_index.py`:
+- [X] T020 [US1] En `scripts/update_index.py`, implementar la reconstrucción: tokenizar con `legalize_tokenizer.tokens_de_documento` cada documento del JSON que no se haya procesado en la pasada, leyendo su `_ruta` desde `repo_dir`, y sin superar el pico de RSS actual. Lo que se guarda por documento es un conjunto de términos; liberar cada uno en cuanto se vuelca a los postings.
+- [X] T021 [US1] En `scripts/update_index.py`:
   - cambiar la condición de salida temprana "El índice ya está al día" para que solo se dé si no hay cambios en disco **y** los postings previos son utilizables (FR-003);
   - fijar el orden de escritura de R3: generación nueva con `legalize_postings.nueva_generacion()`, primero `.postings`, después el JSON con `_meta.generacion` y `_meta.tokenizador`;
   - si falla la escritura del `.postings`, escribir el JSON **sin** esas dos claves (FR-015).
-- [ ] T022 [US1] Ejecutar T016–T018 (verdes) y la suite; medir una pasada incremental del 1% y del 5% sobre `repos/legalize-es` con el script del quickstart §2 y anotar los tiempos en Notes. El presupuesto es "≤ 20 s" hasta el 5% (SC-006); si no se cumple, parar y revisar antes de seguir. Hacer commit `fix(index): keep the inverted index whole across incremental runs`.
+- [X] T022 [US1] Ejecutar T016–T018 (verdes) y la suite; medir una pasada incremental del 1% y del 5% sobre `repos/legalize-es` con el script del quickstart §2 y anotar los tiempos en Notes. El presupuesto es "≤ 20 s" hasta el 5% (SC-006); si no se cumple, parar y revisar antes de seguir. Hacer commit `fix(index): keep the inverted index whole across incremental runs`.
 
 **Checkpoint**: `git pull` + `update_index.py` deja la búsqueda por texto completa.
 
@@ -371,7 +371,8 @@ cierran los silencios que quedarían después.
 
 - Línea base (T001, 2026-10-16): 383 passed, 2 skipped (385), self-test OK con 24 patrones, huella del cuerpo 03446b5a64e4.
 - Carga de `.postings` del corpus español con validación de términos (T007): 0,24 s, presupuesto 0,36 s. `docs("articulo")`: 2,7 ms.
-- Mediciones SC-006 / SC-007 / RSS (T022, T044): _pendiente_
+- T022 (ES, 25.889 docs): indexado completo 137,6 s con pico de 4,21 GB (antes 4,4 GB). Incremental del 1% (258 docs): 11,3 s y 814 MB. Del 5% (1.294 docs): 17,1 s y 1,0 GB. Presupuesto SC-006 de 20 s: cumplido. Términos tras las incrementales: 560.577, igual que el completo.
+- Mediciones SC-007 / RSS finales (T044): _pendiente_
 - Los números de corpus del README (12.291 documentos, 8,7 MB, ~85 MB) están desactualizados
   (hoy son 25.889, 19,5 MB y 142 MB), pero corregirlos queda fuera de esta spec. Conviene abrir
   una tarea aparte.
