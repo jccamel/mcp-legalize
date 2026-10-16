@@ -26,17 +26,22 @@ PAIS = "test"
 def repo_root(tmp_path, monkeypatch):
     """Point the server at an isolated corpus rooted at `tmp_path/repos/legalize-test`.
 
-    `_resolve_ruta` builds its root as `_SCRIPT_DIR / directorio_base`, so both
-    the script directory and the country metadata have to be redirected.
+    Since spec 001 the root is no longer read from `_meta` at resolve time:
+    `_load_indices` checks it against `LEGALIZE_REPOS_DIR` once and records it in
+    `_RAIZ_POR_PAIS`, which is what `_resolve_ruta` reads. The fixture sets that
+    table the way loading would, so every assertion below still tests the same
+    path defences against the same root.
     """
     root = tmp_path / "repos" / "legalize-test"
     (root / "test").mkdir(parents=True)
     (root / "test" / "LAW-1.md").write_text("body", encoding="utf-8")
 
     monkeypatch.setattr(mcp_legalize, "_SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_legalize, "REPOS_DIR", tmp_path / "repos")
     monkeypatch.setitem(
         mcp_legalize._META_POR_PAIS, PAIS, {"directorio_base": "repos/legalize-test"}
     )
+    monkeypatch.setitem(mcp_legalize._RAIZ_POR_PAIS, PAIS, root.resolve())
     return root
 
 

@@ -117,6 +117,7 @@ All configuration is environment variables. There is no configuration file.
 | Variable | Default | Effect |
 |---|---|---|
 | `LEGALIZE_INDICES_DIR` | `<script_dir>/indices` | Where the `index_*.json` files are read from |
+| `LEGALIZE_REPOS_DIR` | `<script_dir>/repos` | The only directory documents are read from. An index whose corpus lies outside it is not served — the index may choose within it, never widen it |
 | `LEGALIZE_DEFAULT_LIMIT` | `20` | Results `buscar_ley` returns when `limite` is not given |
 | `LEGALIZE_MAX_LIMIT` | `100` | Hard cap on `limite` — a larger request is silently clamped |
 | `LEGALIZE_MAX_CONTENT_CHARS` | `80000` | Default for `max_chars` and `contexto_chars`. Not a cap: a caller may ask for more |
@@ -426,9 +427,14 @@ Beyond pattern matching:
 - Requires `_ruta`. An index entry carrying only `_archivo` — a bare filename
   that cannot resolve against the real corpus layout — is refused with a message
   naming the command that regenerates the index.
-- Rejects absolute paths, so a malicious index cannot point at `/etc/passwd`.
-- Resolves symlinks with `Path.resolve()` and validates containment with
-  `Path.is_relative_to()`.
+- Rejects absolute paths in `_ruta`.
+- Validates containment against a root the **operator** decides, not the index.
+  The root used to come from `_meta.directorio_base` of the same index that
+  carried the paths, so an index declaring `directorio_base: "/"` could serve
+  `/etc/hosts`. It is now checked once at load against `LEGALIZE_REPOS_DIR`:
+  an index whose corpus lies outside it is not served, and the others are.
+- Resolves symlinks with `Path.resolve()` — the corpus root as well as each
+  document — and validates containment with `Path.is_relative_to()`.
 - Refuses non-regular files: devices, FIFOs and the like.
 
 Raises `ValueError` when a path fails any of these; the caller catches it, logs
