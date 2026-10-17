@@ -1,0 +1,7 @@
+# Comando que ejecuta los tests de este repo antes de cada commit.
+# Solo se usa la primera línea que no sea comentario.
+#
+# Usa el intérprete del .venv directamente para no depender de que el entorno
+# esté activado en la shell que lanza el commit. Crea el entorno con:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.lock
+.venv/bin/python -m pytest -q -p no:warnings

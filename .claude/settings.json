@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
+      "Read(secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(.ai-policy)",
+      "Edit(.githooks/**)",
+      "Bash(git commit *--no-verify*)",
+      "Bash(git commit -n *)",
+      "Bash(git commit * -n *)",
+      "Bash(git -c *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git checkout -- *)",
+      "Bash(rm *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(npm install *)",
+      "Bash(pnpm add *)",
+      "Bash(yarn add *)",
+      "Bash(pip install *)",
+      "Bash(uv add *)",
+      "Bash(brew install *)",
+      "Bash(git config *)",
+      "Bash(docker volume rm *)",
+      "Bash(docker volume prune *)",
+      "Bash(docker system prune *)",
+      "Bash(docker container prune *)",
+      "Bash(docker image prune *)",
+      "Bash(docker rm *)",
+      "Bash(docker rmi *)",
+      "Bash(docker compose down *-v*)",
+      "Bash(docker compose down *--volumes*)",
+      "Bash(docker run *--privileged*)",
+      "Bash(docker run *--network host*)",
+      "Bash(docker run *--network=host*)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/politica-ia.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/filtrar-tests.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

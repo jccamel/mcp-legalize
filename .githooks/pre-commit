@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# pre-commit de MAD-OS
+#
+# 1. Ejecuta los tests antes de cada commit. Si fallan, el commit no se hace,
+#    lo haya lanzado el agente o tú. No depende de lo que diga el agente.
+# 2. Avisa (sin bloquear) si el commit modifica o borra ficheros de test,
+#    para que preguntes por qué.
+#
+# El comando de tests se define en .githooks/test-command (primera línea que
+# no sea comentario). Activación, una vez por repo:
+#   git config core.hooksPath .githooks
+
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+config="$repo_root/.githooks/test-command"
+
+# --- Aviso de tests modificados o borrados ---------------------------------
+test_regex='(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*$|_test\.[^/]+$|\.(test|spec)\.[^/]+$'
+# En renombrados, git da "R100<TAB>viejo<TAB>nuevo": nos quedamos con el viejo,
+# que es el test que ya existía.
+changed_tests="$(git diff --cached --name-status --diff-filter=MDR | awk -F'\t' '{print $1"\t"$2}' | while IFS=$'\t' read -r status path; do
+  if [[ "$path" =~ $test_regex ]]; then
+    case "$status" in
+      (M*) echo "  modificado: $path" ;;
+      (D*) echo "  BORRADO:    $path" ;;
+      (R*) echo "  renombrado: $path" ;;
+    esac
+  fi
+done)"
+
+if [[ -n "$changed_tests" ]]; then
+  echo "⚠️  Este commit cambia tests que ya existían:" >&2
+  echo "$changed_tests" >&2
+  echo "   Comprueba que el cambio es intencionado (no un test 'arreglado' para que pase)." >&2
+fi
+
+# --- Ejecutar los tests -----------------------------------------------------
+if [[ ! -f "$config" ]]; then
+  echo "pre-commit: no hay comando de tests configurado (.githooks/test-command). Commit sin ejecutar tests." >&2
+  exit 0
+fi
+
+test_cmd="$(grep -v -E '^[[:space:]]*(#|$)' "$config" | head -n 1)"
+if [[ -z "$test_cmd" ]]; then
+  echo "pre-commit: .githooks/test-command no tiene ningún comando activo (todo comentado). Commit sin ejecutar tests." >&2
+  exit 0
+fi
+
+log="$(mktemp -t mados-precommit.XXXXXX)"
+cd "$repo_root" || exit 1
+
+if bash -c "$test_cmd" >"$log" 2>&1; then
+  echo "pre-commit: tests OK ($test_cmd)" >&2
+  rm -f "$log"
+  exit 0
+fi
+
+echo "❌ pre-commit: los tests fallan. Commit cancelado." >&2
+echo "   Comando: $test_cmd" >&2
+echo "--- Últimas 40 líneas (salida completa en $log) ---" >&2
+tail -n 40 "$log" >&2
+exit 1
