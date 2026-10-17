@@ -1289,7 +1289,14 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
-    titulo = found_doc.get("titulo", "")
+    # La identidad de la ley sale del índice y llega al modelo fuera de
+    # <untrusted_content>, igual que en `buscar_ley` y `obtener_ley`, así que pasa
+    # por el mismo saneado y con los mismos límites que `_doc_resumen`. Antes se
+    # devolvía cruda: un título hostil llegaba entero por la única herramienta
+    # que se saltaba el filtro.
+    id_safe = _sanitize_metadata(found_id, max_len=200)
+    pais_safe = _sanitize_metadata(found_pais, max_len=50)
+    titulo = _sanitize_metadata(found_doc.get("titulo", ""))
 
     # Sanitizar input del LLM antes de loguear: evitar log injection via caracteres de control.
     articulo_safe_log = re.sub(r"[\x00-\x1f\x7f]", "", articulo_clean[:50])
@@ -1308,11 +1315,11 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
                 found_id, articulo_safe_log, found_pais,
             )
             return ArticuloResultado(
-                id=found_id, pais=found_pais, titulo=titulo,
+                id=id_safe, pais=pais_safe, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=fragmento, posicion_caracter=start,
             )
 
-    return ArticuloResultado(id=found_id, pais=found_pais, titulo=titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
+    return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
