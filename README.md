@@ -1,5 +1,9 @@
 # Legalize MCP Server
 
+[![CI](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml)
+[![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](#installation)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A Model Context Protocol server that gives an AI assistant read-only access to
 consolidated legislation from multiple jurisdictions.
 
