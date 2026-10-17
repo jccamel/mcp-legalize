@@ -221,7 +221,7 @@ Absolute paths are required in both clients.
 | `listar_paises` | Indexed jurisdictions with document counts and corpus size |
 | `buscar_ley` | Laws matching title text, country, sub-jurisdiction, department, rank, status, year, or a publication, repeal or last-updated date range |
 | `obtener_ley` | Full text and metadata of one law |
-| `obtener_articulo` | A single article, located by number. Recognises Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`) |
+| `obtener_articulo` | A single article, located by number through its heading and ending at the next article or section — never at a mention in the text. Recognises Spanish (`Artículo N`), French (`Article N`), Swedish (`N §`), German and Austrian (`§ N`) |
 | `listar_rangos` | Available norm types with their frequency |
 | `contar_leyes` | How many laws match, without returning them, and in which countries full-text search could not run. Takes the same filters as `buscar_ley` |
 | `estadisticas` | Global metrics of the loaded datasets |
