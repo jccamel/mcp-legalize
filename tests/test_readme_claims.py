@@ -115,3 +115,48 @@ def test_the_readme_does_not_claim_english_only_sanitization():
     """
     assert "Common injection phrases in English" not in README
 
+
+
+# ──────────────────────────────── badges ─────────────────────────────────────
+#
+# A badge is a claim in the most visible line of the page, and the one a reader
+# is least likely to check. Each one is tied here to the file that decides it.
+
+RAIZ = Path(__file__).resolve().parent.parent
+CI = (RAIZ / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+BADGE = re.compile(r"\[!\[([^\]]*)\]\(([^)\s]+)\)\]\(([^)\s]+)\)")
+
+
+def badges() -> dict[str, tuple[str, str]]:
+    """Badge alt text -> (image URL, link), for the badges above the first heading break."""
+    cabecera = README[:README.index("\n---\n")]
+    return {alt: (imagen, enlace) for alt, imagen, enlace in BADGE.findall(cabecera)}
+
+
+def test_the_ci_badge_reports_the_workflow_that_actually_runs():
+    """A badge for a workflow file that was renamed shows "no status" forever."""
+    imagen, enlace = badges()["CI"]
+    flujo = re.search(r"/actions/workflows/([\w.-]+)/badge\.svg", imagen).group(1)
+
+    assert (RAIZ / ".github" / "workflows" / flujo).is_file()
+    assert "branch=main" in imagen
+    assert enlace.endswith(f"/actions/workflows/{flujo}")
+
+
+def test_the_python_badge_lists_exactly_the_versions_ci_tests():
+    """The README states 3.10 as the floor; the badge must not promise more or less than CI runs."""
+    imagen, _ = next(v for alt, v in badges().items() if alt.startswith("Python"))
+    from urllib.parse import unquote
+
+    en_badge = re.findall(r"3\.\d+", unquote(imagen))
+    matriz = re.search(r"python-version:\s*\[([^\]]+)\]", CI).group(1)
+
+    assert en_badge == re.findall(r"3\.\d+", matriz)
+
+
+def test_the_license_badge_names_the_license_in_the_file():
+    imagen, enlace = next(v for alt, v in badges().items() if alt.startswith("License"))
+    licencia = (RAIZ / "LICENSE").read_text(encoding="utf-8").splitlines()[0].split()[0]
+
+    assert f"license-{licencia}" in imagen
+    assert enlace == "LICENSE"
