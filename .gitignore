@@ -22,3 +22,6 @@ indices/*
 # MAD-OS / Claude Code: filtered test logs and per-machine settings
 .claude/logs/
 .claude/settings.local.json
+
+# Banco de paridad de la spec 002: respuestas generadas con los corpus locales
+specs/*/paridad/*.json
