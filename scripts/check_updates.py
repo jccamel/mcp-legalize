@@ -15,6 +15,7 @@ Salida de ejemplo:
     [PT] VACÍO     — el repositorio no tiene commits
     [ES] REGLAS    — auditado con 03446b5a64e4, el escáner está en 9f21c0a3e1bb
     [SE] FORMATO   — formato_distinto
+    [XX] RAÍZ      — el corpus '/tmp/x' está fuera de LEGALIZE_REPOS_DIR (…); no se comprueba
 
 Comprueba además con qué reglas de escaneo se auditó cada índice. Un índice
 puede estar al día en commits y aun así llevar hallazgos calculados con un
@@ -22,13 +23,13 @@ ruleset que ya no existe, porque una pasada incremental no vuelve a mirar los
 ficheros que no cambiaron en disco.
 """
 
+import os
 import sys
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
 _INDICES_DIR = _PROJECT_DIR / "indices"
-_REPOS_DIR   = _PROJECT_DIR / "repos"
 
 # Igual que en update_index.py: este script corre como `python scripts/...`, así
 # que sys.path arranca en scripts/ y la raíz del proyecto no es importable.
@@ -105,7 +106,22 @@ def main() -> None:
             print(f"{label} SIN RUTA  — el índice no tiene 'directorio_base'")
             continue
 
-        repo_dir = _PROJECT_DIR / dir_base
+        # La raíz sale del índice: se contiene en el directorio que autoriza el
+        # operador antes de ejecutar git en ella, con la misma regla que el
+        # servidor. Un índice manipulado podía señalar cualquier directorio del
+        # disco, también un repositorio cuyo `.git/config` ejecuta órdenes.
+        # El valor por defecto es el del servidor (`REPOS_DIR`).
+        autorizada = Path(os.environ.get("LEGALIZE_REPOS_DIR", "") or _PROJECT_DIR / "repos")
+        try:
+            repo_dir = legalize_repo.raiz_del_corpus(dir_base, _PROJECT_DIR, autorizada)
+        except ValueError as exc:
+            print(
+                f"{label} RAÍZ      — {exc}; no se comprueba"
+                f"\n           → reconstruye el índice desde el corpus: "
+                f"python scripts/update_index.py --repo repos/{nombre}"
+            )
+            outdated.append(pais)
+            continue
         if not repo_dir.is_dir():
             print(f"{label} SIN REPO  — {repo_dir} no existe")
             continue

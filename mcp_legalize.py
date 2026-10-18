@@ -38,6 +38,7 @@ import legalize_articulos
 import legalize_frontmatter
 import legalize_normalizacion
 import legalize_indice
+import legalize_repo
 import legalize_tokenizer
 import legalize_injection
 
@@ -271,27 +272,17 @@ _PAIS_NOMBRE = {
 }
 
 def _raiz_del_corpus(meta: dict, autorizada: Path) -> Path:
-    """La raíz de un corpus, resuelta y comprobada contra la autorizada.
+    """La raíz de un corpus según su índice, contenida en `autorizada`.
 
-    El índice puede decir dónde está su corpus, pero solo dentro de
-    `LEGALIZE_REPOS_DIR`: puede elegir, no ampliar. La raíz se calcula como
-    siempre — relativa al proyecto o absoluta — y se resuelve con los enlaces
-    seguidos antes de comprobar la contención, así que un enlace dentro del
-    directorio autorizado que apunta fuera no la cumple.
-
-    Lanza ValueError si la raíz queda fuera o no es texto.
+    Sin `directorio_base`, el corpus es el propio directorio autorizado. La
+    regla de contención es `legalize_repo.raiz_del_corpus`, la misma que
+    aplica `check_updates.py` antes de ejecutar git. Lanza ValueError si la
+    raíz queda fuera o no es texto.
     """
     dir_base = meta.get("directorio_base")
     if dir_base is None or dir_base == "":
         return autorizada
-    if not isinstance(dir_base, str):
-        raise ValueError(f"'directorio_base' no es texto: {dir_base!r}")
-    raiz = (_SCRIPT_DIR / dir_base).resolve()
-    if not raiz.is_relative_to(autorizada):
-        raise ValueError(
-            f"el corpus {dir_base!r} está fuera de LEGALIZE_REPOS_DIR ({str(autorizada)!r})"
-        )
-    return raiz
+    return legalize_repo.raiz_del_corpus(dir_base, _SCRIPT_DIR, autorizada)
 
 def _load_indices():
     if not INDICES_DIR.exists() or not INDICES_DIR.is_dir():

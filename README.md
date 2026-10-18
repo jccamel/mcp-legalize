@@ -188,6 +188,11 @@ searchable text even when nothing changed on disk, and an index in the previous
 format is migrated — the old `.json`, `.postings` and `.bin` are deleted once
 the database is in place. An index that cannot be opened is rebuilt.
 
+An index whose corpus root lies outside `LEGALIZE_REPOS_DIR` is reported as
+`RAÍZ` and not checked at all: the root comes from the index, and running git in
+a directory a tampered index chose would let that repository's own configuration
+run commands. Git is also invoked with `core.fsmonitor` and hooks disabled.
+
 Every run writes into a copy of the index and swaps it in whole, so an
 interrupted run leaves the previous index untouched. An incremental run over 1%
 of the Spanish corpus takes 6.7 s, over 5% 12.2 s.
