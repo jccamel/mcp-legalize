@@ -32,6 +32,7 @@ if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
 
 import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
+import legalize_indice  # noqa: E402  (idem)
 import legalize_injection  # noqa: E402  (idem)
 import legalize_postings  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
@@ -391,6 +392,43 @@ def _write_invertido(index_path: Path, postings: dict[str, list[str]],
     )
     legalize_postings.ruta_formato_anterior(index_path.parent, nombre).unlink(missing_ok=True)
     return n
+
+def _escribir_base_de_datos(destino: Path, data: dict, repo_dir: Path) -> None:
+    """Escribe el índice en el formato de la spec 002, con lo mismo que el JSON.
+
+    Transitorio: mientras el servidor siga leyendo el JSON, el indexador
+    escribe los dos, y un test exige que contengan lo mismo. Se reconstruye
+    entera en cada pasada leyendo el cuerpo de cada documento; cuando el JSON
+    se retire, la pasada incremental pasará a hacerse sobre la propia base de
+    datos.
+
+    La ruta de cada documento sale del índice, así que se lee con la misma
+    contención que `_terminos_en_disco`: dentro de `repo_dir` y fichero
+    regular, o el documento se escribe sin cuerpo.
+    """
+    raiz = repo_dir.resolve()
+    escritor = legalize_indice.Escritor(destino)
+    try:
+        for doc_id, entry in data.get("documentos", {}).items():
+            cuerpo = ""
+            ruta_rel = entry.get("_ruta", "")
+            if isinstance(ruta_rel, str) and ruta_rel:
+                ruta = (raiz / ruta_rel).resolve()
+                if ruta.is_relative_to(raiz) and ruta.is_file():
+                    try:
+                        cuerpo = legalize_frontmatter.cuerpo(
+                            ruta.read_text(encoding="utf-8", errors="replace"))
+                    except OSError:
+                        pass
+            escritor.poner_ley(doc_id, entry, cuerpo)
+        for clave, valor in data.get("_meta", {}).items():
+            if clave not in ("total_documentos", "generacion"):
+                escritor.poner_meta(clave, valor)
+    except BaseException:
+        escritor.descartar()
+        raise
+    escritor.confirmar()
+
 
 def _write_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -880,6 +918,14 @@ def main() -> None:
         print("OK")
     except Exception as exc:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print("Escribiendo base de datos …", end=" ", flush=True)
+    try:
+        _escribir_base_de_datos(index_path.with_suffix(".db"), data, repo_dir)
+        print("OK")
+    except Exception as exc:
+        print(f"\n[ERROR] no se pudo escribir la base de datos: {exc}", file=sys.stderr)
         sys.exit(1)
 
     seguridad = meta_idx["seguridad"]

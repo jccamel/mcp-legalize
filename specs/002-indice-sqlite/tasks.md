@@ -121,7 +121,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 ### Indexador: construcción completa (base de US1 y US4)
 
-- [ ] T010 Hacer que `scripts/update_index.py` escriba `index_<repo>.db` con
+- [X] T010 Hacer que `scripts/update_index.py` escriba `index_<repo>.db` con
   `legalize_indice.Escritor`, en lugar del JSON y el `.postings`:
   - la pasada completa, con el escáner, la cuarentena, los duplicados, el truncado de
     metadatos y el registro de seguridad de hoy (en `meta.seguridad` como JSON);
@@ -398,4 +398,8 @@ Cada una pasa la CI por sí sola.
 
 - Línea base (T001, 2026-10-18): 576 passed, 2 skipped; self-test OK (huella 03446b5a64e4). `main` en cc72413.
 - Referencia de paridad (T003): 1.178 peticiones (191 buscar_ley, 96 contar_leyes, 162 obtener_ley, 720 obtener_articulo, 9 de listado), 0 excepciones, generada con `main` cc72413 sobre los corpus es c1b7254a, se 0e6c4b6, fr e38417f, eu 46c90a58. `paridad/referencia-main.json` (3,7 MB, ignorado por git), sha256 fa3f780975e8991c…
+- Ajustes de orden (2026-10-18), para que cada commit pase el pre-commit en verde:
+  - Python 3.12 en la CI se adelanta a la fase 2: las PR apiladas pasan la CI por sí solas, y en 3.10/3.11 no hay `setconfig`. La protección de `main` sigue exigiendo los checks de 3.10 y 3.11 y hay que cambiarla con permiso del usuario.
+  - T010 escribe los dos formatos (JSON+postings y `.db`) hasta US4; `test_indice_desde_indexador.py` exige que contengan lo mismo y en el mismo orden.
+  - T011 (migrar los tests que leen el JSON) pasa a US4, al retirar el JSON; T012 (`instalar_corpus`) y T016 (sintaxis de FTS5 a través de las herramientas) pasan a US1, donde el servidor ya lee la base de datos.
 - Mediciones (T028, T031, T034, T040): _pendiente_
