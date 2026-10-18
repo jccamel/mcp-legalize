@@ -17,15 +17,51 @@ entero para alcanzarla. Como el servidor importa el tokenizador, ejecutar
 del operador arrancaban el servidor y exigían `fastmcp` solo para plegar
 acentos (defecto #9).
 
-No importa nada del proyecto. La tabla forma parte de la huella del
-tokenizador, así que cambiarla invalida los índices construidos con la anterior.
+Cómo se pliega (ADR 0008). Antes una tabla enumeraba a mano las vocales
+acentuadas; lo que no listaba sobrevivía al plegado y el patrón de término
+`[0-9a-z]` partía la palabra. Medido el 2026-10-18: 875 palabras francesas
+rotas (`être` → "tre", `arrêté` → "arr", `œuvre` → "uvre") y 1.864 españolas
+(`año` sin término, `España` → "espa"). Ahora:
+
+- Se quitan todas las marcas diacríticas tras la descomposición canónica (NFD),
+  así que un idioma que nadie enumeró también se pliega. Solo canónica: NFKD
+  reescribiría ordinales y ligaduras (`1º`, `ﬁ`), que no son diacríticos.
+- La `ñ` se conserva como letra: plegarla a `n` juntaría año con ano y uña con
+  una. El tokenizador la admite en su patrón.
+- Una tabla pequeña cubre lo que Unicode no descompone (œ, æ, ß, ø, ł) y el
+  punto volado catalán, que partía `col·legi`.
+
+Sigue plegando å ä ö a a a o, como aceptó el ADR 0004 para el sueco.
+
+No importa nada del proyecto. La función entera forma parte de la huella del
+tokenizador, así que cambiar cómo se pliega invalida los índices construidos
+antes, que el indexador reconstruye solo.
 """
 
-_DIACRITICS_SRC = 'áéíóúàèìòùäëïöüñçåæøÄËÏÖÜÑÇÅÆØ'
-_DIACRITICS_DST = 'aeiouaeiouaeiouñcaaoaeiouñcaao'
-TABLA = str.maketrans(_DIACRITICS_SRC, _DIACRITICS_DST)
+import re
+import unicodedata
+
+# Letras que la descomposición canónica no separa en base + marca, y el punto
+# volado catalán. Se aplican tras quitar las marcas.
+TABLA = str.maketrans({
+    "œ": "oe", "æ": "ae", "ß": "ss", "ø": "o", "ł": "l", "đ": "d",
+    "·": "",
+})
+
+# Marcas combinantes de los bloques diacríticos. Tras NFD son ellas las que
+# llevan el acento, la diéresis, la cedilla o el anillo.
+_MARCAS_RE = re.compile("[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]")
+
+# `n` seguida de la tilde combinante, que es como NFD descompone la `ñ`.
+_ENYE_DESCOMPUESTA = "ñ"
 
 
 def normalizar(texto: str) -> str:
-    """Minúsculas y diacríticos plegados, para comparar; nunca para servir."""
-    return texto.lower().translate(TABLA)
+    """Minúsculas y diacríticos plegados, para comparar; nunca para servir.
+
+    Todo son operaciones en C —`lower`, `normalize`, `replace`, `sub`,
+    `translate`—, porque el tokenizador pasa por aquí el corpus entero.
+    """
+    descompuesto = unicodedata.normalize("NFD", texto.lower())
+    con_enye = descompuesto.replace(_ENYE_DESCOMPUESTA, "ñ")
+    return _MARCAS_RE.sub("", con_enye).translate(TABLA)

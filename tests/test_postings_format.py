@@ -319,16 +319,20 @@ def test_a_current_file_wins_over_a_leftover_bin(tmp_path):
 def test_the_module_cannot_unpickle_and_does_not_reach_the_server():
     """No `pickle` to misuse, and no import of `mcp_legalize`.
 
-    Importing the server from here would repeat the cycle that already loads it
+    Importing the server from here would repeat the cycle that used to load it
     twice when run as a script (#9 of the review); the tokenizer fingerprint is
     passed in as an argument instead.
+
+    `legalize_tokenizer` used to be forbidden too, for the same cycle. Since #48
+    the tokenizer no longer imports the server, and the format now validates
+    terms with the tokenizer's own pattern instead of a copy that diverged
+    (ADR 0008), so that import is allowed.
     """
     fuente = Path(lp.__file__).read_text(encoding="utf-8")
 
     importados = set(re.findall(r"^\s*(?:import|from)\s+([\w.]+)", fuente, re.MULTILINE))
     assert "pickle" not in importados
     assert "mcp_legalize" not in importados
-    assert "legalize_tokenizer" not in importados
 
 
 def test_a_new_generation_is_32_hex_and_not_repeated():

@@ -48,7 +48,7 @@ threat model is a compromised corpus, not a compromised client.
 |---|---|
 | Multi-jurisdiction | Any corpus following the Legalize Format Spec |
 | Search | Title text, country, sub-jurisdiction, department, legal rank, status, year, and publication, repeal or last-updated date ranges |
-| Full-text search | `texto` matches terms in the body of the law, in any order, through an inverted index built per corpus |
+| Full-text search | `texto` matches terms in the body of the law, in any order, through an inverted index built per corpus. Diacritics are folded (`forêt` = `foret`), `ñ` is kept (`año` ≠ `ano`) |
 | Article extraction | Returns a single article rather than a whole statute |
 | Indexing | Recursive scan of cloned repositories into JSON indices |
 | Mock corpus | A one-document repository ships with the server, so an integration can be tested without cloning gigabytes |

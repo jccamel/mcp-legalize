@@ -30,9 +30,9 @@ Escriben el indexador; leen el servidor y `check_updates.py`. Los tres pasan por
 aquí, por el mismo motivo que hay un solo parser de frontmatter y un solo
 vocabulario de inyección: dos copias de una regla acaban discrepando.
 
-No importa `mcp_legalize` ni `legalize_tokenizer`. La huella del tokenizador
-llega como argumento, para no repetir el ciclo de importaciones que hoy carga el
-servidor dos veces cuando se ejecuta como script.
+No importa `mcp_legalize`. La huella del tokenizador llega como argumento. Sí
+importa `legalize_tokenizer`, para validar los términos con su mismo patrón:
+desde #48 el tokenizador ya no arrastra el servidor, así que no hay ciclo.
 """
 
 import os
@@ -41,6 +41,8 @@ import secrets
 import tempfile
 from pathlib import Path
 from typing import Iterable, Mapping
+
+import legalize_tokenizer
 
 FIRMA = "legalize-postings 1"
 
@@ -53,11 +55,12 @@ GENERACION_DISTINTA = "generacion_distinta"
 # En el orden en que `estado` los evalúa: gana el primero que se cumple.
 MOTIVOS = (FORMATO_ANTERIOR, SIN_POSTINGS, ILEGIBLES, TOKENIZADOR_DISTINTO, GENERACION_DISTINTA)
 
-# El patrón de término del tokenizador. Se repite aquí como validación de
-# entrada, no como regla: quien decide qué es un término sigue siendo
-# `legalize_tokenizer`, y un fichero cuyos términos no lo cumplen no lo escribió
-# el indexador.
-_TERMINO_RE = re.compile(r"[0-9a-z]{3,}")
+# Un término válido es lo que el tokenizador produce, con su mismo patrón y no
+# con una copia. La copia que hubo aquí, `[0-9a-z]{3,}`, divergió en cuanto el
+# tokenizador empezó a admitir la `ñ` (ADR 0008): el primer `año` hacía
+# ilegible el fichero entero y España perdía la búsqueda por texto. Un fichero
+# con términos que el tokenizador no produciría no lo escribió el indexador.
+_TERMINO_RE = legalize_tokenizer._PATRON_TOKEN
 _HUELLA_RE = re.compile(r"[0-9a-f]{12}")
 _GENERACION_RE = re.compile(r"[0-9a-f]{32}")
 
