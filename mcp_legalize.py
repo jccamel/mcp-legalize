@@ -337,6 +337,12 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
                      or index_path.stem.replace("index_", ""))
         if not isinstance(pais_code, str):
             pais_code = index_path.stem.replace("index_", "")
+        # El código sale del índice y es a la vez lo que ve el modelo y la
+        # clave con la que el cliente vuelve a pedir el país, así que se sanea
+        # una vez, aquí, y se guarda ya limpio: todo lo que lo muestra sale
+        # saneado y lo que el cliente lee le sirve como filtro.
+        pais_code = (_sanitize_metadata(pais_code, max_len=50)
+                     or _sanitize_metadata(index_path.stem.replace("index_", ""), max_len=50))
         raiz = _raiz_del_corpus(meta, autorizada)
         total = con.execute("SELECT count(*) FROM leyes").fetchone()[0]
     except ValueError as exc:
@@ -353,7 +359,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
     meta["conteos"] = legalize_indice.conteos_validos(meta.get("conteos"))
     _CONEXIONES[pais_code] = con
     _META_POR_PAIS[pais_code] = meta
-    _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
+    _INDEX_FILE_POR_PAIS[pais_code] = _sanitize_metadata(index_path.stem, max_len=100)
     _RAIZ_POR_PAIS[pais_code] = raiz
     if meta.get("tokenizador") != legalize_tokenizer.huella():
         # El texto se plegó con otras reglas: buscar con las actuales daría
@@ -367,9 +373,6 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         file=sys.stderr,
     )
 
-_load_indices()
-_TOTAL_DOCS = sum(c.execute("SELECT count(*) FROM leyes").fetchone()[0] for c in _CONEXIONES.values())
-print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_CONEXIONES)} jurisdicción(es).", file=sys.stderr)
 
 
 # ─────────────────────────── Helpers ─────────────────────────────────────────
@@ -733,6 +736,13 @@ def _resolve_ley(id_ley: str, pais: str = ""):
 
 # ─────────────────────────── Servidor MCP ────────────────────────────────────
 
+# La carga va aquí y no junto a `_load_indices`: registrar un índice sanea su
+# código de país con `_sanitize_metadata`, que se define más arriba.
+_load_indices()
+_TOTAL_DOCS = sum(c.execute("SELECT count(*) FROM leyes").fetchone()[0] for c in _CONEXIONES.values())
+print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_CONEXIONES)} jurisdicción(es).", file=sys.stderr)
+
+
 mcp = FastMCP(
     name="Legalize",
     instructions="""
@@ -963,7 +973,7 @@ def buscar_ley(
         return ErrorRespuesta(error="No hay índices disponibles.")
 
     if pais and pais not in _CONEXIONES:
-        return ErrorRespuesta(error=f"País '{pais}' no reconocido.", sugerencias=list(_CONEXIONES.keys()))
+        return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' no reconocido.", sugerencias=list(_CONEXIONES.keys()))
 
     limite = min(max(1, limite), MAX_LIMIT)
 
@@ -1025,7 +1035,7 @@ def contar_leyes(
         return ErrorRespuesta(error="No hay índices disponibles.")
 
     if pais and pais not in _CONEXIONES:
-        return ErrorRespuesta(error=f"País '{pais}' no reconocido.",
+        return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' no reconocido.",
                               sugerencias=list(_CONEXIONES.keys()))
 
     # Mismo generador que `buscar_ley`, para que el conteo no pueda describir
@@ -1220,6 +1230,9 @@ def _conteos(pais: str, nombre: str) -> dict:
             conteo[codigo] = meta["conteos"]["bytes"]
             continue
         for clave, total in meta["conteos"][nombre]:
+            # Las claves son valores del corpus. Dos que se sanean igual suman
+            # en una sola entrada, para que ningún listado repita una etiqueta.
+            clave = _sanitize_metadata(clave, max_len=100)
             conteo[clave] = conteo.get(clave, 0) + total
     return conteo
 
@@ -1227,7 +1240,7 @@ def _conteos(pais: str, nombre: str) -> dict:
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
-    if pais and pais not in _CONEXIONES: return ErrorRespuesta(error=f"País '{pais}' desconocido")
+    if pais and pais not in _CONEXIONES: return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' desconocido")
     conteo = _conteos(pais, "rangos")
     return [RangoConteo(rango=r, total=c) for r, c in sorted(conteo.items(), key=lambda x: -x[1])]
 
