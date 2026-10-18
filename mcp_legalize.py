@@ -744,6 +744,7 @@ Servidor de legislación bajo el estándar Legalize (multipaís).
 Herramientas disponibles:
 - listar_paises: jurisdicciones disponibles e info del corpus.
 - buscar_ley: buscar leyes por título, texto del cuerpo, rango, estado, país.
+  `texto` busca palabras en cualquier orden; `frase`, una frase exacta.
 - contar_leyes: cuántas leyes cumplen los mismos filtros que buscar_ley, sin
   devolverlas, y en qué países no se pudo buscar por texto.
 - obtener_ley: lee el contenido de una ley.
@@ -818,7 +819,7 @@ def _consultas(
     consulta: str, texto: str, pais: str, rango: str, estado: str, anno: str,
     jurisdiccion: str, departamento: str, fecha_desde: str, fecha_hasta: str,
     derogada_desde: str, derogada_hasta: str,
-    actualizada_desde: str, actualizada_hasta: str,
+    actualizada_desde: str, actualizada_hasta: str, frase: str,
     sin_consultar: list,
 ) -> list[tuple[str, str, list]]:
     """`(pais, where, parametros)` de cada país que la consulta debe recorrer.
@@ -829,15 +830,18 @@ def _consultas(
     puedan describir consultas distintas (FR-012).
     """
     paises = _paises(pais)
-    match = None
+    expresiones = []
     if texto:
         terminos = legalize_tokenizer.tokens(texto)
-        # Una consulta sin ningún término buscable no se ha buscado en ningún
-        # sitio, y decir "cero coincidencias" sería mentir (FR-011).
-        if not terminos:
-            sin_consultar.extend((codigo, CONSULTA_SIN_TERMINOS) for codigo in paises)
-            return []
-        match = legalize_indice.terminos_fts(terminos)
+        expresiones.append(legalize_indice.terminos_fts(terminos) if terminos else None)
+    if frase:
+        expresiones.append(legalize_indice.frase_fts(frase))
+    # Una consulta sin ningún término buscable no se ha buscado en ningún
+    # sitio, y decir "cero coincidencias" sería mentir (FR-011).
+    if None in expresiones:
+        sin_consultar.extend((codigo, CONSULTA_SIN_TERMINOS) for codigo in paises)
+        return []
+    match = " AND ".join(expresiones) or None
 
     where, parametros = legalize_indice.construir_filtro(
         consulta=consulta, rango=rango, estado=estado, anno=anno, jurisdiccion=jurisdiccion,
@@ -874,7 +878,7 @@ def _filtrar_docs(*filtros, sin_consultar: list):
             yield codigo, fila[0], legalize_indice.fila_a_doc(fila)
 
 
-def _error_sin_texto(sin_consultar: list, pais: str) -> "ErrorRespuesta | None":
+def _error_sin_texto(sin_consultar: list, pais: str, texto: str = "") -> "ErrorRespuesta | None":
     """El error de `buscar_ley` cuando la búsqueda por texto no se hizo en ningún país pedido.
 
     Los códigos de país pasan por `_sanitize_metadata`: salen del índice.
@@ -887,11 +891,14 @@ def _error_sin_texto(sin_consultar: list, pais: str) -> "ErrorRespuesta | None":
     sugerencias = [f"{_sanitize_metadata(codigo, max_len=50)}: {motivo}"
                    for codigo, motivo in sin_consultar]
     if all(motivo == CONSULTA_SIN_TERMINOS for _, motivo in sin_consultar):
-        return ErrorRespuesta(
-            error="La consulta de texto no tiene términos buscables: ninguno llega a "
-                  "tres caracteres. No se ha buscado nada.",
-            sugerencias=sugerencias,
-        )
+        # Lo que falló es `texto` si trae algo y ningún término; si no, es la
+        # `frase`, que no tiene mínimo de longitud y solo falla sin palabras.
+        if texto and not legalize_tokenizer.tokens(texto):
+            error = ("La consulta de texto no tiene términos buscables: ninguno llega a "
+                     "tres caracteres. No se ha buscado nada.")
+        else:
+            error = "La frase no tiene ninguna palabra, solo signos. No se ha buscado nada."
+        return ErrorRespuesta(error=error, sugerencias=sugerencias)
     return ErrorRespuesta(
         error="La búsqueda por texto no está disponible en los países pedidos; "
               "no es que no haya coincidencias. Motivo en `sugerencias`.",
@@ -916,6 +923,7 @@ def buscar_ley(
     actualizada_hasta: str = "",
     limite: int = DEFAULT_LIMIT,
     offset: int = 0,
+    frase: str = "",
 ) -> list[DocumentoResumen] | ErrorRespuesta:
     """
     Busca leyes por múltiples criterios.
@@ -928,6 +936,10 @@ def buscar_ley(
       pedidos, devuelve ErrorRespuesta con el motivo; si pasa solo en algunos,
       devuelve los resultados de los demás, y `contar_leyes` con los mismos
       filtros lista los que faltan en `sin_consultar`.
+    - frase: texto que debe aparecer SEGUIDO y en ese orden en el cuerpo, sin
+      importar acentos ni mayúsculas. A diferencia de `texto`, cuentan también
+      las palabras cortas: "ley de 1978" exige el "de". Se combina con todo lo
+      demás y no se interpreta como sintaxis: comillas, AND o * son texto.
     - pais: código ISO (es, se, at, de, fr…).
     - rango: tipo de norma (ley, forordning, Verordnung…).
     - estado: in_force, repealed, partially_repealed, annulled, expired.
@@ -965,7 +977,7 @@ def buscar_ley(
     for pais_code, doc_id, doc in _filtrar_docs(
         consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
         fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta, sin_consultar=sin_consultar,
+        actualizada_desde, actualizada_hasta, frase, sin_consultar=sin_consultar,
     ):
         if skipped < offset:
             skipped += 1
@@ -979,7 +991,7 @@ def buscar_ley(
     # postings no puede esconder los resultados de los demás (decisión Q3). Si
     # no se pudo buscar en ninguno, `[]` diría "ninguna ley lo contiene" cuando
     # nadie miró, así que es un error que dice dónde y por qué.
-    error = _error_sin_texto(sin_consultar, pais)
+    error = _error_sin_texto(sin_consultar, pais, texto)
     return error if error is not None else resultados
 
 @mcp.tool()
@@ -998,6 +1010,7 @@ def contar_leyes(
     derogada_hasta: str = "",
     actualizada_desde: str = "",
     actualizada_hasta: str = "",
+    frase: str = "",
 ) -> Conteo | ErrorRespuesta:
     """
     Cuenta cuántas leyes cumplen unos filtros, sin devolverlas.
@@ -1027,7 +1040,7 @@ def contar_leyes(
         for codigo, where, parametros in _consultas(
             consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
             fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-            actualizada_desde, actualizada_hasta, sin_consultar,
+            actualizada_desde, actualizada_hasta, frase, sin_consultar,
         )
     )
     return Conteo(total=total, sin_consultar=[

@@ -30,6 +30,7 @@ No importa `mcp_legalize`.
 
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import urllib.parse
@@ -378,6 +379,25 @@ def terminos_fts(terminos) -> str:
     paréntesis del cliente no puede funcionar como operador (FR-006).
     """
     return " AND ".join('"' + t.replace('"', '""') + '"' for t in sorted(terminos))
+
+
+# Una palabra para FTS5 (`unicode61`): una letra o un dígito. Lo demás separa.
+_PALABRA_RE = re.compile(r"[^\W_]")
+
+
+def frase_fts(frase: str) -> str | None:
+    """Una expresión MATCH que exige `frase` seguida y en orden, o None si no tiene palabras.
+
+    La frase se pliega como el texto indexado (ADR 0008) y va como UNA sola
+    cadena entre comillas, con las internas duplicadas: FTS5 la parte con el
+    mismo tokenizador con el que indexó, así que las palabras cortas cuentan
+    (`ley de 1978` exige el `de`) y nada de lo que escribe el cliente llega como
+    sintaxis (FR-006).
+    """
+    plegada = legalize_normalizacion.normalizar(frase)
+    if not _PALABRA_RE.search(plegada):
+        return None
+    return '"' + plegada.replace('"', '""') + '"'
 
 
 def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion="", departamento="",

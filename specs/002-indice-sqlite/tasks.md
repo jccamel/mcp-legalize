@@ -310,7 +310,7 @@ FR-016).
 
 **Independent Test**: quickstart §5.
 
-- [ ] T032 [P] [US3] Crear `tests/test_frase.py`:
+- [X] T032 [P] [US3] Crear `tests/test_frase.py`:
   - un corpus sintético con «arrendamiento urbano» seguido en unos documentos y las palabras
     separadas en otros: `frase` devuelve solo los primeros y `texto` sigue devolviendo ambos;
   - plegado (`"ARRENDAMIENTO URBANO"`, `forêt`/`foret`);
@@ -319,11 +319,11 @@ FR-016).
   - `contar_leyes` coincide con `buscar_ley`;
   - frase sin palabras → `consulta_sin_terminos`;
   - un país sin texto buscable aparece en `sin_consultar`.
-- [ ] T033 [US3] Añadir `frase` a `construir_filtro`: la frase plegada como **una única**
+- [X] T033 [US3] Añadir `frase` a `construir_filtro`: la frase plegada como **una única**
   cadena FTS5 entrecomillada, con `"` escapado como `""`. Añadir `frase: str = ""` a
   `buscar_ley` y `contar_leyes`, con docstring, instrucciones del servidor y Tool reference
   del README.
-- [ ] T034 [US3] Medir SC-006 en ES (`frase="arrendamiento urbano"`: 4 frente a 573 en la
+- [X] T034 [US3] Medir SC-006 en ES (`frase="arrendamiento urbano"`: 4 frente a 573 en la
   prueba de concepto). Commit `feat: search for an exact phrase`.
 
 ---
@@ -435,4 +435,18 @@ Cada una pasa la CI por sí sola.
     - Con un `capitulo` que no corresponde, `ubicaciones` se lista aunque el número sea único.
     - Los tests de artículos que ya existían instalan ahora el cuerpo real (antes parcheaban `_read_file`), así que pasan por las filas: si se sabotea el corte, fallan 23.
     - El banco ignora los campos nuevos del contrato (`ubicacion`, `ubicaciones`) cuando la referencia no los tiene, y cuenta aparte cuántas respuestas los traen rellenos.
-  - T034, T040: _pendiente_
+  - T034 / SC-006 (2026-10-18). Frase frente a palabras; de cada frase se revisaron hasta 100 resultados, y ninguno carece de la frase en su texto:
+
+    | Corpus | Frase | Como frase | Tiempo | Como palabras |
+    |---|---|---|---|---|
+    | es | «arrendamiento urbano» | 4 | 0,4 ms | 573 (las cifras de la prueba de concepto) |
+    | es | «proteccion de datos» | 3.424 | 83,7 ms | 8.833 |
+    | es | «ley de enjuiciamiento civil» | 401 | 12,1 ms | 812 |
+    | se | «allmän försäkring» | 274 | 0,5 ms | 368 |
+    | eu | «data protection» | 904 | 3,0 ms | 3.913 |
+    | fr | «fonds de commerce» | 36 | 8,7 ms | 68 |
+
+    Para T040: contar una frase muy común supera el objetivo de p95 < 5 ms del quickstart (83,7 ms con 3.424 resultados).
+  - Ajuste en US3: una `frase` sin palabras da su propio mensaje de error; el de `texto` no cambia, porque el banco compara su texto exacto.
+  - Paridad tras US3: 0 diferencias en 1.178 peticiones.
+  - T040: _pendiente_
