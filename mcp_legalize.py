@@ -897,16 +897,41 @@ def _resolve_ley(id_ley: str, pais: str = ""):
     lista de Python, así que un cliente que quisiera ofrecerlas tenía que volver
     a parsear la prosa. Y son IDs del corpus, es decir texto no confiable: pasan
     por _sanitize_metadata igual que cualquier otro metadato que llega al LLM.
+
+    La comparación no distingue mayúsculas, pero lo que se devuelve es siempre
+    la clave guardada. Antes se pasaba la petición a mayúsculas y se buscaba tal
+    cual, mientras el indexador guarda los ids como vienen: 245 leyes españolas
+    (`BOJA-b-…`), 44 suecas (`SFS-1827-60s.1007`) y todo id numérico, que lleva
+    el prefijo del país en minúsculas, aparecían en `buscar_ley` y no había
+    forma de abrirlas. Medido el 2026-10-18; en ninguno de los dos corpus hay
+    dos ids que solo se distingan por mayúsculas.
+
+    Aun así, una coincidencia exacta gana primero, y dos claves que empatan al
+    ignorar mayúsculas son una ambigüedad: elegir una en silencio serviría una
+    ley que el cliente no nombró.
     """
-    id_norm = id_ley.strip().upper().replace(".MD", "")
+    pedido = id_ley.strip()
+    if pedido.casefold().endswith(".md"):
+        pedido = pedido[:-3]
+    clave = pedido.casefold()
     paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
 
     for pais_code in paises_a_buscar:
         docs = _DOCS_POR_PAIS[pais_code]
-        if id_norm in docs:
-            return pais_code, id_norm, docs[id_norm], None
+        if pedido in docs:
+            return pais_code, pedido, docs[pedido], None
 
-        matches = [(k, v) for k, v in docs.items() if id_norm in k]
+        iguales = [(k, v) for k, v in docs.items() if k.casefold() == clave]
+        if len(iguales) == 1:
+            k, v = iguales[0]
+            return pais_code, k, v, None
+        if len(iguales) > 1:
+            return None, None, None, ErrorRespuesta(
+                error="ID ambiguo: coincide con más de una ley si se ignoran mayúsculas.",
+                sugerencias=[_sanitize_metadata(k, max_len=200) for k, _ in iguales[:10]],
+            )
+
+        matches = [(k, v) for k, v in docs.items() if clave in k.casefold()]
         if len(matches) == 1:
             k, v = matches[0]
             return pais_code, k, v, None
@@ -917,7 +942,7 @@ def _resolve_ley(id_ley: str, pais: str = ""):
             )
 
     return None, None, None, ErrorRespuesta(
-        error=f"Ley no encontrada: {_sanitize_metadata(id_norm, max_len=100)}"
+        error=f"Ley no encontrada: {_sanitize_metadata(pedido, max_len=100)}"
     )
 
 
