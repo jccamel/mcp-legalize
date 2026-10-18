@@ -16,5 +16,6 @@ Registro de las decisiones que condicionan el proyecto. Cada decisión vive en s
 | 0004 | [Se acepta plegar å, ä y ö también en sueco](0004-plegado-de-vocales-suecas.md) | Aceptada | 2026-08-25 |
 | 0005 | [Búsqueda por presencia e intersección, sin ranking](0005-busqueda-por-presencia-sin-ranking.md) | Aceptada | 2026-08-24 |
 | 0006 | [Cuarentena por fichero; los metadatos se registran pero no bloquean](0006-cuarentena-por-fichero.md) | Aceptada | 2026-08-21 |
-| 0007 | [Postings en un formato de texto propio, atados a su índice JSON](0007-postings-en-formato-de-texto-propio.md) | Aceptada | 2026-10-16 |
+| 0007 | [Postings en un formato de texto propio, atados a su índice JSON](0007-postings-en-formato-de-texto-propio.md) | Sustituida por 0009 | 2026-10-16 |
 | 0008 | [Plegado genérico de diacríticos, conservando la ñ](0008-plegado-generico-con-enye.md) | Aceptada | 2026-10-18 |
+| 0009 | [El índice de cada corpus es una base de datos SQLite, abierta como entrada no confiable](0009-indice-en-base-de-datos.md) | Aceptada | 2026-10-18 |

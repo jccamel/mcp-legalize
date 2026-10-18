@@ -154,9 +154,12 @@ class ArticuloResultado(BaseModel):
 class PaisNoConsultado(BaseModel):
     """Un país donde la búsqueda por texto no se pudo hacer, y por qué.
 
-    `motivo` es `sin_postings`, `ilegibles`, `tokenizador_distinto` o
-    `consulta_sin_terminos`, cuando ningún término de la consulta llega a la
-    longitud mínima del tokenizador.
+    `motivo` es `sin_postings` (el país no tiene índice), `ilegibles`,
+    `tokenizador_distinto` o `consulta_sin_terminos`, cuando la consulta no
+    tiene nada que buscar: ningún término de `texto` llega a la longitud mínima
+    del tokenizador, o la `frase` no tiene palabras. El nombre `sin_postings` se
+    conserva porque es parte del contrato; los postings desaparecieron con la
+    spec 002.
     """
     pais: str
     motivo: str
@@ -354,6 +357,9 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         con.close()
         return
 
+    # Los conteos de los listados se usan solo si tienen la forma que escribe
+    # el indexador; si no, `_conteos` los calcula la primera vez.
+    meta["conteos"] = legalize_indice.conteos_validos(meta.get("conteos"))
     _CONEXIONES[pais_code] = con
     _META_POR_PAIS[pais_code] = meta
     _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
@@ -643,11 +649,9 @@ def _strip_frontmatter(content: str) -> str:
     """
     return legalize_frontmatter.cuerpo(content)
 
-# Qué decirle al operador según el motivo por el que unos postings no sirven.
-# Ninguno es un error del servidor: el país sigue respondiendo a todo lo que no
-# sea búsqueda por texto.
-# Motivo propio de la consulta, no de los postings: ningún término llega a la
-# longitud mínima del tokenizador.
+# Motivo propio de la consulta, no del índice: no tiene nada que buscar. Los
+# demás motivos son del índice de cada país, y ninguno es un error del
+# servidor: el país sigue respondiendo a todo lo que no sea búsqueda por texto.
 CONSULTA_SIN_TERMINOS = "consulta_sin_terminos"
 
 _SELECT_LEY = "SELECT " + ", ".join(legalize_indice.COLUMNAS_LEY) + " FROM leyes"
@@ -663,13 +667,6 @@ def _motivo_sin_texto(pais: str) -> str | None:
 def _paises(pais: str = "") -> list[str]:
     """Los países que recorre una consulta, en el orden de los ficheros de índice."""
     return [pais] if pais and pais in _CONEXIONES else list(_CONEXIONES)
-
-
-def _iter_docs(pais: str = ""):
-    """(pais, id, doc) de cada ley, en el orden del corpus."""
-    for pais_code in _paises(pais):
-        for fila in _CONEXIONES[pais_code].execute(_SELECT_LEY + " ORDER BY n"):
-            yield pais_code, fila[0], legalize_indice.fila_a_doc(fila)
 
 
 def _resolve_ley(id_ley: str, pais: str = ""):
@@ -718,8 +715,17 @@ def _resolve_ley(id_ley: str, pais: str = ""):
                 sugerencias=[_sanitize_metadata(f[0], max_len=200) for f in iguales[:10]],
             )
 
-        matches = con.execute(_SELECT_LEY + " WHERE instr(id_casefold, ?) > 0 ORDER BY n LIMIT 11",
-                              (clave,)).fetchall()
+        # Primero los números de fila, recorriendo el índice de `id_casefold`
+        # —mucho más estrecho que la tabla— y después las filas. Medido en el
+        # corpus español: 0,6 ms frente a 3,4 recorriendo la tabla, que hacía
+        # este caso más lento que con el índice en memoria (SC-004). El índice
+        # existe siempre: `abrir` rechaza un esquema sin él.
+        numeros = [n for n, in con.execute(
+            "SELECT n FROM leyes INDEXED BY leyes_id_casefold "
+            "WHERE instr(id_casefold, ?) > 0 ORDER BY n LIMIT 11", (clave,))]
+        matches = con.execute(
+            f"{_SELECT_LEY} WHERE n IN ({', '.join('?' * len(numeros))}) ORDER BY n",
+            numeros).fetchall() if numeros else []
         if len(matches) == 1:
             return pais_code, matches[0][0], legalize_indice.fila_a_doc(matches[0]), None
         if len(matches) > 1 and len(paises_a_buscar) == 1:
@@ -777,7 +783,6 @@ Estado del texto: cada ley trae `estado_texto`, que dice qué es su cuerpo.
 - as_enacted: el acto tal como se publicó; sus modificaciones NO están
   incorporadas. `ultima_modificacion` identifica la última, si la hubo. No
   presentes un artículo `as_enacted` como el texto vigente.
-Si viene vacío, el índice es anterior a este campo y no se sabe.
 
 Idioma: las CLAVES de la respuesta son de este servidor y van en castellano;
 los VALORES se reproducen literalmente del documento fuente y nunca se traducen.
@@ -988,7 +993,7 @@ def buscar_ley(
 
     # La lista se conserva mientras se haya podido buscar en al menos un país
     # pedido: 16 llamadas dependen de que esto sea una lista, y un país sin
-    # postings no puede esconder los resultados de los demás (decisión Q3). Si
+    # texto buscable no puede esconder los resultados de los demás (decisión Q3). Si
     # no se pudo buscar en ninguno, `[]` diría "ninguna ley lo contiene" cuando
     # nadie miró, así que es un error que dice dónde y por qué.
     error = _error_sin_texto(sin_consultar, pais, texto)
@@ -1208,31 +1213,42 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
                              error="Artículo no encontrado", ubicaciones=ubicaciones,
                              **_estado_del_texto(found_doc))
 
+def _conteos(pais: str, nombre: str) -> dict:
+    """`{clave: total}` de los países pedidos, en orden de primera aparición.
+
+    Los conteos los prepara el indexador (`legalize_indice.contar`) y llegan en
+    `meta`, validados al registrar el índice. Si no llegaron o no servían, se
+    cuentan aquí una vez con la misma función y se guardan.
+    """
+    conteo: dict = {}
+    for codigo in _paises(pais):
+        meta = _META_POR_PAIS[codigo]
+        if meta.get("conteos") is None:
+            meta["conteos"] = legalize_indice.contar(_CONEXIONES[codigo])
+        if nombre == "bytes":
+            conteo[codigo] = meta["conteos"]["bytes"]
+            continue
+        for clave, total in meta["conteos"][nombre]:
+            conteo[clave] = conteo.get(clave, 0) + total
+    return conteo
+
+
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
     if pais and pais not in _CONEXIONES: return ErrorRespuesta(error=f"País '{pais}' desconocido")
-    conteo = {}
-    for _, _, doc in _iter_docs(pais):
-        r = doc.get("rango") or "desconocido"
-        conteo[r] = conteo.get(r, 0) + 1
+    conteo = _conteos(pais, "rangos")
     return [RangoConteo(rango=r, total=c) for r, c in sorted(conteo.items(), key=lambda x: -x[1])]
 
 @mcp.tool()
 def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
-    estados, rangos, annos, total_bytes, paises_res = {}, {}, {}, 0, set()
-    for p_code, _, doc in _iter_docs(pais):
-        paises_res.add(p_code)
-        e = doc.get("estado") or "desconocido"
-        estados[e] = estados.get(e, 0) + 1
-        r = doc.get("rango") or "desconocido"
-        rangos[r] = rangos.get(r, 0) + 1
-        fp = doc.get("fecha_publicacion", "")
-        if fp and len(fp) >= 4:
-            a = fp[:4]
-            annos[a] = annos.get(a, 0) + 1
-        total_bytes += _bytes_de(doc)
+    estados = _conteos(pais, "estados")
+    rangos = _conteos(pais, "rangos")
+    annos = _conteos(pais, "annos")
+    total_bytes = sum(_conteos(pais, "bytes").values())
+    paises_res = {codigo for codigo in _paises(pais)
+                  if any(total for _, total in _META_POR_PAIS[codigo]["conteos"]["estados"])}
 
     return Estadisticas(
         total_documentos=sum(estados.values()),

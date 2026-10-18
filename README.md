@@ -1,7 +1,7 @@
 # Legalize MCP Server
 
 [![CI](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml)
-[![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](#installation)
+[![Python 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)](#installation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A Model Context Protocol server that gives an AI assistant read-only access to
@@ -48,9 +48,9 @@ threat model is a compromised corpus, not a compromised client.
 |---|---|
 | Multi-jurisdiction | Any corpus following the Legalize Format Spec |
 | Search | Title text, country, sub-jurisdiction, department, legal rank, status, year, and publication, repeal or last-updated date ranges |
-| Full-text search | `texto` matches terms in the body of the law, in any order, through an inverted index built per corpus. Diacritics are folded (`forêt` = `foret`), `ñ` is kept (`año` ≠ `ano`) |
+| Full-text search | `texto` matches terms in the body of the law, in any order; `frase` matches an exact phrase. Both go to a full-text table in each corpus's index. Diacritics are folded (`forêt` = `foret`), `ñ` is kept (`año` ≠ `ano`) |
 | Article extraction | Returns a single article rather than a whole statute |
-| Indexing | Recursive scan of cloned repositories into JSON indices |
+| Indexing | Recursive scan of cloned repositories into one SQLite database per corpus, with articles located and counts prepared at index time |
 | Mock corpus | A one-document repository ships with the server, so an integration can be tested without cloning gigabytes |
 
 The sequence below shows a complete exchange. The protocol gives the assistant
@@ -61,7 +61,7 @@ sequenceDiagram
     participant U as User
     participant AI as AI Assistant (Claude/Cursor)
     participant MCP as mcp_legalize.py
-    participant I as JSON Indices (Memory)
+    participant I as Index (SQLite, one per corpus)
     participant R as Git Repositories (Disk)
 
     U->>AI: "What does article 135 of the Spanish Constitution say?"
@@ -69,14 +69,15 @@ sequenceDiagram
     note over AI,MCP: MCP Protocol
     AI->>MCP: Call tool: buscar_ley(consulta="Constitución Española", pais="es", rango="constitucion")
 
-    MCP->>I: In-memory search
+    MCP->>I: SQL query
     I-->>MCP: Returns matching documents
     MCP-->>AI: [BOE-A-1978-31229, ...]
 
     AI->>MCP: Call tool: obtener_articulo(id_ley="BOE-A-1978-31229", articulo="135")
+    MCP->>I: Where article 135 starts and ends
     MCP->>R: Read specific .md file on disk
     R-->>MCP: Raw Markdown Content
-    MCP-->>AI: Extract and return only Article 135 text
+    MCP-->>AI: Return only Article 135 text
 
     AI-->>U: Synthesized, accurate answer based on the official text.
 ```
@@ -122,7 +123,7 @@ All configuration is environment variables. There is no configuration file.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `LEGALIZE_INDICES_DIR` | `<script_dir>/indices` | Where the `index_*.json` files are read from |
+| `LEGALIZE_INDICES_DIR` | `<script_dir>/indices` | Where the `index_*.db` files are read from |
 | `LEGALIZE_REPOS_DIR` | `<script_dir>/repos` | The only directory documents are read from. An index whose corpus lies outside it is not served — the index may choose within it, never widen it |
 | `LEGALIZE_DEFAULT_LIMIT` | `20` | Results `buscar_ley` returns when `limite` is not given |
 | `LEGALIZE_MAX_LIMIT` | `100` | Hard cap on `limite` — a larger request is silently clamped |
@@ -175,15 +176,21 @@ It reports four independent kinds of staleness:
 |---|---|
 | `DESACTUAL` | The corpus has commits the index does not cover |
 | `REGLAS` | The index was audited under a different scanner ruleset |
-| `TOKENS` | The postings were built under a different tokenizer |
-| `POSTINGS` | The postings are missing, unreadable, in the old pickle format, or belong to another generation of the JSON index |
+| `TOKENS` | The searchable text was folded under a different tokenizer |
+| `FORMATO` | The index cannot be served: it only exists in the previous format (JSON), it is of another format version, unreadable, or its schema holds something it should not |
 
 None is a variant of another. An index can match the corpus exactly and still
-carry findings computed under patterns that no longer exist, or postings built
-under rules that have since changed. Each line proposes the command that
-resolves it, and running that command once resolves it: a ruleset mismatch
-forces a full rescan, and a tokenizer or postings problem forces the postings to
-be rebuilt even when nothing changed on disk.
+carry findings computed under patterns that no longer exist, or searchable text
+built under rules that have since changed. Each line proposes the command that
+resolves it, and running that command once resolves it, with no flags: a
+ruleset mismatch forces a full rescan, a tokenizer mismatch rewrites the
+searchable text even when nothing changed on disk, and an index in the previous
+format is migrated — the old `.json`, `.postings` and `.bin` are deleted once
+the database is in place. An index that cannot be opened is rebuilt.
+
+Every run writes into a copy of the index and swaps it in whole, so an
+interrupted run leaves the previous index untouched. An incremental run over 1%
+of the Spanish corpus takes 6.7 s, over 5% 12.2 s.
 
 ---
 
@@ -234,9 +241,9 @@ arbitrary. `contar_leyes` is how a client tells *"these are the 24 laws"* from
 *"these are 100 of 1,092, in no particular order"*.
 
 It is also how a client tells *"no law contains these words"* from *"nobody
-looked"*. Full-text search needs a country's postings, and a country can be
-without usable ones — never indexed, unreadable, built by another tokenizer, or
-in the old pickle format. `contar_leyes` lists every such country in
+looked"*. Full-text search needs a country's searchable text, and a country can
+be without usable text — unreadable, or folded by another tokenizer.
+`contar_leyes` lists every such country in
 `sin_consultar`, with the reason. `buscar_ley` keeps returning a list while at
 least one requested country could be searched, and returns an error naming the
 countries only when none could — before, it returned `[]`, the same answer as
@@ -343,8 +350,8 @@ symlinks — on Windows, anywhere without Developer Mode. That test is the only
 cover for `Path.resolve()` following a link out of the corpus, which is why CI
 runs on Linux and asserts that it ran.
 
-Continuous integration runs the suite on every push across Python 3.12 and
-3.13. It asserts that the tests **ran**, not merely that nothing failed:
+Continuous integration runs the suite on every push across Python 3.12,
+3.13 and 3.14. It asserts that the tests **ran**, not merely that nothing failed:
 
 | Step | Guards against |
 |---|---|
@@ -563,26 +570,31 @@ a security control.
 | `--show-warnings` | Print `warn`-level findings, which are counted in the summary by default |
 | `--self-test` | Verify the security patterns and exit; requires no repository |
 
-#### 7. Code-free postings (High)
+#### 7. The index opened as untrusted input (High)
 
-The inverted index behind `texto` used to be a pickle, loaded with
-`pickle.load` on the first full-text query. A pickle names callables to run
-while it is read, so write access to `indices/` was code execution inside the
-server. It is now `inverted_<repo>.postings`, a plain text format this project
-owns and reads with `str.split` and `int()`:
+Each corpus is indexed into one SQLite database, `index_<repo>.db`. Whoever can
+write to `indices/` is the attacker of the threat model, and a database brings
+its own surface: a schema can carry triggers and views that change what a query
+does, an FTS3 tokenizer can be registered from SQL, a page can be corrupt. So
+the server opens it the same way every time, before running a single query on
+the data:
 
-- The old `inverted_<repo>.bin` is recognised by its name and **never opened**.
-  The country reports `formato_anterior` until it is reindexed, and the indexer
-  deletes the `.bin` once its replacement is written.
-- Every structural rule is validated at load; a malformed file costs full-text
-  search in that country and nothing else.
-- The postings carry the tokenizer fingerprint and a random `generacion` shared
-  with their JSON index. Postings from another tokenizer or paired with another
-  JSON are not used.
+- read-only, in SQLite's **defensive mode** (`SQLITE_DBCONFIG_DEFENSIVE`), with
+  `trusted_schema=OFF`, `query_only` and `cell_size_check`. On a Python without
+  `Connection.setconfig` (before 3.12) no index is served at all;
+- the schema is compared with the canonical one, statement by statement. A
+  trigger, a view, an extra table or index, or a changed column rejects the
+  database with a reason (`esquema_inesperado`), and costs that corpus only;
+- every value a client sends reaches SQL as a bound parameter, and every
+  full-text term or phrase as a quoted string, so `AND`, `NEAR`, `*` or
+  parentheses are searched as text, never read as syntax;
+- values read back are untrusted too: sizes of the wrong type count as 0,
+  article offsets that do not fit the text fall back to locating the article
+  on it, and counts that do not have the expected shape are recomputed.
 
-Measured on the Spanish corpus it also beats the pickle on every axis: 75.8 MB
-on disk against 142.3, 0.24 s to load with validation against 0.36, and 176 MB
-resident against 394. See `docs/decisiones/0007-postings-en-formato-de-texto-propio.md`.
+The formats it replaces are recognised by name and never opened: the JSON index
+and its `.postings` are migrated by the indexer, and the pickle `.bin` that
+preceded them is deleted. See `docs/decisiones/0009-indice-en-base-de-datos.md`.
 
 ### Index provenance
 
@@ -612,16 +624,19 @@ anything that depends on someone remembering to update it drifts. It deliberatel
 ignores the order of the table, and changes to metadata-only patterns, since
 neither affects what a body scan finds.
 
-Two more stamps sit beside `seguridad` in `_meta`, and describe the postings:
+`seguridad` lives in the `meta` table of each database, beside the rest of the
+index's provenance:
 
-| Field | Meaning |
+| Key | Meaning |
 |---|---|
-| `tokenizador` | Fingerprint of the tokenizer the postings were built with |
-| `generacion` | Random identifier shared with the postings file written in the same run |
+| `formato` | Version of the database format; another version is not served |
+| `tokenizador` | Fingerprint of the tokenizer the searchable text was folded with |
+| `conteos` | Counts behind `estadisticas` and `listar_rangos`, prepared when the index is written |
+| `git_commit` | Commit of the corpus the index covers, when the corpus is its own repository |
+| `directorio_base`, `pais_predeterminado`, `generado_en` | Where the corpus is, its default country, and when the index was written |
 
-Both are written only when the postings really were. The postings are written
-first and the JSON second, so an interrupted run leaves a mismatch the next run
-detects and repairs, rather than stamps that nothing backs.
+Everything in `meta` is written in the same transaction as the laws it
+describes, so it cannot disagree with them.
 
 ### Limitations and remaining risk
 
@@ -665,8 +680,10 @@ detects and repairs, rather than stamps that nothing backs.
   absolute paths, parent traversal, escaping symlinks and control characters in
   stored paths — and a corpus root declared by the index itself, which is now
   checked against `LEGALIZE_REPOS_DIR`.
-- Code execution through a planted postings file: the format cannot run code,
-  and the old pickle is never opened.
+- A tampered index database: triggers, views, extra tables or changed columns
+  reject it before any query, it is opened read-only in SQLite's defensive mode,
+  and client text never reaches the engine as SQL or full-text syntax. The old
+  pickle is never opened.
 - Log-line forgery through index file names and country codes, which every
   loader message formats with `!r`.
 - Tag injection through unescaped attributes.

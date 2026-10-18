@@ -17,7 +17,6 @@ already do. Moving it must not change the tokenizer fingerprint: the table is
 the same, and every index built under it must stay current.
 """
 
-import json
 import os
 import subprocess
 import sys
@@ -80,7 +79,9 @@ def test_moving_the_table_keeps_every_existing_index_current():
     """The versioned mock index was stamped before the move; its stamp must still match."""
     import legalize_tokenizer
 
-    meta = json.loads((RAIZ / "indices" / "index_legalize-mock.json").read_text(encoding="utf-8"))["_meta"]
+    import legalize_indice
+
+    meta = legalize_indice.como_dict(RAIZ / "indices" / "index_legalize-mock.db")["_meta"]
 
     assert legalize_tokenizer.huella() == meta["tokenizador"]
 

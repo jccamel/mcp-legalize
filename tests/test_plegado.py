@@ -84,21 +84,18 @@ def test_the_fingerprint_covers_the_folding_function_not_only_its_table(monkeypa
     assert tk.huella() != antes
 
 
-def test_postings_with_the_new_terms_are_readable(tmp_path):
-    """The postings format validated terms against its own copy of `[0-9a-z]{3,}`.
-
-    Found measuring the Spanish corpus after the change: the first term with
-    `ñ` made the whole file unreadable, and Spain lost full-text search. Two
+def test_words_with_n_tilde_are_searchable_in_the_body(instalar_corpus):
+    """Found measuring the Spanish corpus after ADR 0008: the old postings format
+    validated terms against its own copy of `[0-9a-z]{3,}`, so the first term
+    with `ñ` made the whole file unreadable and Spain lost full-text search. Two
     copies of one rule had diverged — the failure principle III exists to stop.
-    The format now validates against the tokenizer's own pattern.
+
+    The format is gone (spec 002); what must still hold is the outcome: a body
+    with `ñ` is searchable by those words, and `año` is not `ano`.
     """
-    import legalize_postings as lp
+    instalar_corpus("es", {"ES-1": {"titulo": "t", "_ruta": "a.md"}},
+                    {"ES-1": "El año de la enseñanza, œuvre, forêt y Maßnahmen."})
 
-    terminos = tk.tokens("año enseñanza œuvre forêt Maßnahmen")
-    ruta = lp.ruta_postings(tmp_path, "tst")
-    lp.escribir(ruta, {t: {"DOC-1"} for t in terminos}, tokenizador=tk.huella(), generacion="a" * 32)
-
-    postings, motivo = lp.estado(tmp_path, "tst", tk.huella(), "a" * 32)
-
-    assert motivo is None
-    assert postings.docs("año") == {"DOC-1"}
+    for termino in ["año", "AÑO", "enseñanza", "oeuvre", "foret", "massnahmen"]:
+        assert [r.id for r in mcp_legalize.buscar_ley.fn(pais="es", texto=termino)] == ["ES-1"], termino
+    assert mcp_legalize.buscar_ley.fn(pais="es", texto="ano") == []

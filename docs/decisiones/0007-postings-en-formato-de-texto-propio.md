@@ -1,6 +1,6 @@
 # 0007 — Postings en un formato de texto propio, atados a su índice JSON
 
-- **Estado:** Aceptada
+- **Estado:** Sustituida por [0009](0009-indice-en-base-de-datos.md)
 - **Fecha:** 2026-10-16
 - **Ámbito:** `legalize_postings.py`; `scripts/update_index.py`; `scripts/check_updates.py`; carga de postings en `mcp_legalize.py`
 - **Sustituye a:** [0003](0003-indice-invertido-en-fichero-aparte.md)

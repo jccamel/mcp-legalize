@@ -330,21 +330,21 @@ FR-016).
 
 ## Phase 8: Polish & Cross-Cutting
 
-- [ ] T035 Python 3.12 como suelo:
+- [X] T035 Python 3.12 como suelo:
   - `.github/workflows/ci.yml` con la matriz `['3.12', '3.13']` (añadir `3.14` si
     `requirements.lock` instala) y la rama del lock en 3.12;
   - el README (Installation) y los comentarios que citan 3.10;
   - comprobar que `test_config_docs` y `test_readme_claims` siguen en verde.
-- [ ] T036 Sustituir `indices/index_legalize-mock.json` e
+- [X] T036 Sustituir `indices/index_legalize-mock.json` e
   `indices/inverted_legalize-mock.postings` por `indices/index_legalize-mock.db`, generado
   con `update_index.py`, y ajustar las excepciones de `.gitignore`.
-- [ ] T037 Retirar `legalize_postings.py` y cualquier referencia restante (comprobarlo con
+- [X] T037 Retirar `legalize_postings.py` y cualquier referencia restante (comprobarlo con
   `grep`).
-- [ ] T038 [P] Escribir `docs/decisiones/0009-indice-en-base-de-datos.md`: la decisión, las
+- [X] T038 [P] Escribir `docs/decisiones/0009-indice-en-base-de-datos.md`: la decisión, las
   medidas de la prueba de concepto y las finales, las alternativas (JSON + postings,
   Tantivy, motores externos) y la seguridad. Marcar los ADR 0003 y 0007 como sustituidos por
   el 0009 y actualizar el índice.
-- [ ] T039 [P] Actualizar `README.md`:
+- [X] T039 [P] Actualizar `README.md`:
   - Overview, Configuration, Keeping indices current (`FORMATO`) e Index provenance (`meta`);
   - sustituir la Mitigation 7 por la apertura segura de la base de datos;
   - cifras nuevas medidas (FR-018).
@@ -449,4 +449,13 @@ Cada una pasa la CI por sí sola.
     Para T040: contar una frase muy común supera el objetivo de p95 < 5 ms del quickstart (83,7 ms con 3.424 resultados).
   - Ajuste en US3: una `frase` sin palabras da su propio mensaje de error; el de `texto` no cambia, porque el banco compara su texto exacto.
   - Paridad tras US3: 0 diferencias en 1.178 peticiones.
-  - T040: _pendiente_
+  - T040 (2026-10-18). Con los cuatro corpus, `main` (cc72413) frente a la rama, en la misma máquina:
+    - carga de los cinco índices: 143 ms y +163 MB en `main`; 27 ms y +4 MB en la rama;
+    - primera consulta: 0,2 ms en las dos;
+    - memoria tras el banco completo: +578 MB frente a +182 MB (3,1×). SC-002 se cumple al cargar, pero no tras el banco: lo que crece es servir el texto de los ficheros, igual en las dos;
+    - p95: texto 9,6 frente a 3,7 ms; artículos 7,2 frente a 2,7 ms;
+    - indexado completo de ES (SC-007): 150 s y 4,14 GB en `main`; 201 s y 0,56 GB en la rama. **El tiempo NO cumple SC-007 (+34 %); queda abierto.** Perfil sobre se: ~6 s de `localizar_todos` en ES y la escritura en FTS5; el plegado (~39 s) ya se pagaba antes. Una caché de escritura mayor no ayuda.
+    - Al medir aparecieron dos peticiones más lentas que en `main`, ya corregidas:
+      - `estadisticas` y `listar_rangos` (hasta 92 ms frente a 3–9): ahora usan conteos preparados al indexar (`meta.conteos`), validados y recalculados si no sirven;
+      - id inexistente sin país (8,1 frente a 5,2 ms): la subcadena recorre solo el índice de ids.
+    - Paridad final: 0 diferencias en 1.178 peticiones.

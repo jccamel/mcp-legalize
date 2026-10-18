@@ -222,8 +222,11 @@ class Escritor:
         return self._con.execute("SELECT count(*) FROM temp.vocabulario").fetchone()[0]
 
     def confirmar(self) -> None:
-        """Cierra la transacción, compacta y sustituye el índice vigente."""
+        """Cuenta, cierra la transacción, compacta y sustituye el índice vigente."""
         try:
+            # Dentro de la misma transacción: los conteos describen exactamente
+            # las leyes que se confirman.
+            self.poner_meta("conteos", contar(self._con))
             self._con.execute("COMMIT")
             self._con.execute("INSERT INTO cuerpo(cuerpo) VALUES ('optimize')")
             self._con.execute("VACUUM")
@@ -348,6 +351,65 @@ def como_dict(ruta: Path) -> dict:
         return {"_meta": meta, "documentos": documentos}
     finally:
         con.close()
+
+
+# ──────────────────────────────── contar ─────────────────────────────────────
+
+# Una columna de texto como clave de conteo: vacía, o de otro tipo en una base
+# de datos manipulada, cuenta como "desconocido".
+_CLAVE = "CASE WHEN typeof({c}) = 'text' AND {c} != '' THEN {c} ELSE 'desconocido' END"
+_CONTEOS = {
+    "estados": (_CLAVE.format(c="estado"), "1"),
+    "rangos": (_CLAVE.format(c="rango"), "1"),
+    "annos": ("substr(fecha_publicacion, 1, 4)",
+              "typeof(fecha_publicacion) = 'text' AND length(fecha_publicacion) >= 4"),
+}
+
+
+def contar(con: sqlite3.Connection) -> dict:
+    """Los conteos de `estadisticas` y `listar_rangos` de un índice.
+
+    `{"estados" | "rangos" | "annos": [[clave, total], ...], "bytes": total}`.
+    Cada lista va en orden de primera aparición en el corpus: los listados
+    ordenan por total con un `sorted` estable, así que los empates salen en ese
+    orden, como cuando se contaba recorriendo el índice en memoria. Los bytes
+    son solo los enteros (la regla de `_bytes_de`, #14), con `total`, que no
+    desborda.
+
+    Lo calcula el escritor al confirmar, porque contar al consultar son cuatro
+    recorridos de la tabla: 92 ms en el corpus español frente a los 3–9 ms que
+    tardaba con el índice en memoria (SC-004).
+    """
+    salida: dict = {
+        nombre: [[clave, total] for clave, total, _ in con.execute(
+            f"SELECT {expresion} AS clave, count(*), min(n) FROM leyes WHERE {donde} "
+            f"GROUP BY clave ORDER BY min(n)")]
+        for nombre, (expresion, donde) in _CONTEOS.items()
+    }
+    salida["bytes"] = con.execute(
+        "SELECT total(CASE WHEN typeof(bytes) = 'integer' THEN bytes END) FROM leyes").fetchone()[0]
+    return salida
+
+
+def conteos_validos(valor) -> dict | None:
+    """`valor` si tiene la forma que escribe `contar`, o None.
+
+    Sale de `meta`, que es entrada no confiable: si no se puede usar, quien
+    lo lee cuenta con `contar` en lugar de fallar o de servir otra cosa.
+    """
+    if not isinstance(valor, dict):
+        return None
+    for nombre in _CONTEOS:
+        lista = valor.get(nombre)
+        if not isinstance(lista, list) or not all(
+                isinstance(par, list) and len(par) == 2 and isinstance(par[0], str)
+                and isinstance(par[1], int) and not isinstance(par[1], bool) and par[1] >= 0
+                for par in lista):
+            return None
+    total = valor.get("bytes")
+    if isinstance(total, bool) or not isinstance(total, (int, float)) or total < 0:
+        return None
+    return valor
 
 
 # ─────────────────────────────── consultar ───────────────────────────────────

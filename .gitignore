@@ -15,8 +15,7 @@ repos/*
 !repos/legalize-mock/
 indices/*
 !indices/.gitkeep
-!indices/index_legalize-mock.json
-!indices/inverted_legalize-mock.postings
+!indices/index_legalize-mock.db
 .pytest_cache/
 
 # MAD-OS / Claude Code: filtered test logs and per-machine settings

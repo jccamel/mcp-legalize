@@ -710,9 +710,9 @@ def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
         return dict(sorted(conservados.items()))
 
     meta_idx["seguridad"] = {
-        # Una pasada que solo reconstruye los postings no escanea nada, así que
-        # no puede refrescar la fecha del escaneo: afirmaría una auditoría que
-        # no ocurrió.
+        # Una pasada que no escanea nada —la que solo retira los ficheros del
+        # formato anterior— no puede refrescar la fecha del escaneo: afirmaría
+        # una auditoría que no ocurrió.
         "escaneado_en": (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
                          if pendientes else previo.get("escaneado_en")
                          or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")),

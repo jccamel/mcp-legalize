@@ -129,9 +129,9 @@ def main() -> None:
 
         # El tokenizador es ortogonal a las otras dos comprobaciones por el
         # mismo motivo que el ruleset lo es al commit: un índice puede estar al
-        # día en disco y auditado con las reglas vigentes, y aun así llevar
-        # listas de postings construidas con un patrón de token, una longitud
-        # mínima o una tabla de normalización que ya cambiaron.
+        # día en disco y auditado con las reglas vigentes, y aun así llevar un
+        # texto buscable plegado con un patrón de token, una longitud mínima o
+        # una tabla de normalización que ya cambiaron.
         huella_tok_indice = _texto(meta, "tokenizador")
         if huella_tok_indice != huella_tok_actual:
             if huella_tok_indice:
