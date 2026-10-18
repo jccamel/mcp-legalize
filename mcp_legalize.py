@@ -34,6 +34,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 import legalize_frontmatter
+import legalize_normalizacion
 import legalize_postings
 import legalize_tokenizer
 import legalize_injection
@@ -184,12 +185,10 @@ class ErrorRespuesta(BaseModel):
 
 # ─────────────────────────── Normalización (necesaria antes de cargar índices) ──
 
-_DIACRITICS_SRC = 'áéíóúàèìòùäëïöüñçåæøÄËÏÖÜÑÇÅÆØ'
-_DIACRITICS_DST = 'aeiouaeiouaeiouñcaaoaeiouñcaao'
-_NORMALIZE_TABLE = str.maketrans(_DIACRITICS_SRC, _DIACRITICS_DST)
-
-def _normalize(text: str) -> str:
-    return text.lower().translate(_NORMALIZE_TABLE)
+# La tabla de plegado vive en `legalize_normalizacion`, compartida con el
+# tokenizador. Se conserva el nombre `_normalize` porque es el que usa todo este
+# módulo y el que espían los tests de la caché.
+_normalize = legalize_normalizacion.normalizar
 
 
 # Clave del campo normalizado que `_campo_normalizado` guarda dentro del propio
