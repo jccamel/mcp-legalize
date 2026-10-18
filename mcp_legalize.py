@@ -125,6 +125,11 @@ class ArticuloResultado(BaseModel):
     articulo_buscado: str
     texto: Optional[str] = None
     posicion_caracter: Optional[int] = None
+    # Los mismos tres campos que `LeyCompleta`. `texto_truncado` vale False en
+    # cuanto hay artículo; los dos contadores solo se rellenan si se cortó.
+    texto_truncado: Optional[bool] = None
+    chars_totales: Optional[int] = None
+    chars_devueltos: Optional[int] = None
     error: Optional[str] = None
 
 class PaisNoConsultado(BaseModel):
@@ -490,8 +495,13 @@ _NEXT_SECTION_RE = re.compile(
     r"^#{1,6}[ \t]",
 )
 
-def _localizar_articulo(content: str, articulo: str, contexto_chars: int) -> tuple[int, int] | None:
-    """`(inicio, fin)` del artículo en `content`, o None si no se encuentra.
+def _localizar_articulo(content: str, articulo: str, contexto_chars: int) -> tuple[int, int, int] | None:
+    """`(inicio, fin, fin_real)` del artículo en `content`, o None si no se encuentra.
+
+    `fin_real` es donde acaba el artículo según el documento; `fin`, donde se
+    corta lo que se devuelve. Solo difieren cuando nada marca el final y se
+    aplica `contexto_chars`: entonces el artículo llega hasta el final del
+    documento y lo devuelto es un trozo. Quien llama lo usa para decirlo.
 
     Primero entre los encabezados Markdown, en orden de documento: el artículo
     acaba en el siguiente encabezado de igual o menor número de `#`, es decir,
@@ -519,15 +529,17 @@ def _localizar_articulo(content: str, articulo: str, contexto_chars: int) -> tup
                  or any(p.search(e.group(2).strip()) for p in otro_articulo)),
                 None,
             )
-            fin = siguiente.start() if siguiente else enc.end() + contexto_chars
-            return enc.start(), min(fin, len(content))
+            if siguiente:
+                return enc.start(), siguiente.start(), siguiente.start()
+            return enc.start(), min(enc.end() + contexto_chars, len(content)), len(content)
 
     for tpl in _ARTICULO_EN_LINEA_TEMPLATE:
         m = re.search(tpl.format(term=term), content)
         if m:
             siguiente = _NEXT_SECTION_RE.search(content, m.end())
-            fin = siguiente.start() if siguiente else m.end() + contexto_chars
-            return m.start(), min(fin, len(content))
+            if siguiente:
+                return m.start(), siguiente.start(), siguiente.start()
+            return m.start(), min(m.end() + contexto_chars, len(content)), len(content)
     return None
 
 _UNTRUSTED_CLOSE_RE = re.compile(
@@ -1350,8 +1362,14 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if articulo_clean:
         localizado = _localizar_articulo(content, articulo_clean, contexto_chars)
         if localizado:
-            start, end = localizado
+            start, end, fin_real = localizado
             fragmento_texto = content[start:end].strip()
+            # Cortado si queda texto del artículo más allá de lo devuelto. Antes
+            # no se decía: 49 parágrafos suecos con un anexo largo sin
+            # encabezados al final se entregaban en sus primeros 80.000
+            # caracteres como si fueran enteros (principio I).
+            completo = content[start:fin_real].strip()
+            truncado = len(completo) > len(fragmento_texto)
             # Detectar encodings sospechosos en el artículo extraído
             _check_suspicious_encoding(fragmento_texto, f"{found_id}#{articulo_safe_log}")
             fragmento = _wrap_untrusted(fragmento_texto, found_doc, found_pais)
@@ -1363,6 +1381,9 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             return ArticuloResultado(
                 id=id_safe, pais=pais_safe, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=fragmento, posicion_caracter=start,
+                texto_truncado=truncado,
+                chars_totales=len(completo) if truncado else None,
+                chars_devueltos=len(fragmento_texto) if truncado else None,
             )
 
     return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
