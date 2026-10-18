@@ -17,7 +17,7 @@ import inspect
 import re
 
 import legalize_frontmatter
-import mcp_legalize
+import legalize_normalizacion
 
 # Longitud mínima de un término. Por debajo quedan las palabras vacías —"de",
 # "la", "y"— que aparecen en casi todos los documentos: engordan cada lista de
@@ -28,7 +28,7 @@ _MIN_LONGITUD = 3
 # vocales acentuadas ya vienen plegadas y no hay que enumerarlas aquí.
 #
 # Esto explica por qué el tokenizador español funciona sin cambios sobre el
-# corpus sueco: `_NORMALIZE_TABLE` pliega å ä ö antes de que este patrón las
+# corpus sueco: `legalize_normalizacion.TABLA` pliega å ä ö antes de que este patrón las
 # vea.
 #
 # Para el sueco ese plegado es lingüísticamente falso — å, ä y ö son letras
@@ -38,7 +38,7 @@ _MIN_LONGITUD = 3
 # está el vocabulario legal más frecuente.
 #
 # Se acepta a propósito, no por descuido. El plegado es comportamiento de todo
-# el servidor (13 usos de `_normalize`), así que cambiarlo solo aquí haría que
+# el servidor (`legalize_normalizacion`), así que cambiarlo solo aquí haría que
 # `texto` y `consulta` discreparan sobre el mismo documento — el hueco que A1 y
 # A2 cerraron. Cambiarlo en todos exige normalización por idioma, que es un
 # rediseño y no un arreglo. Lo que decide no es una medición sino si a un
@@ -62,7 +62,7 @@ def tokens(texto: str) -> set[str]:
     `protección` por título y por texto daría resultados distintos sobre el
     mismo documento.
     """
-    return set(_PATRON_TOKEN.findall(mcp_legalize._normalize(texto)))
+    return set(_PATRON_TOKEN.findall(legalize_normalizacion.normalizar(texto)))
 
 
 def tokens_de_documento(documento: str) -> set[str]:
@@ -90,14 +90,14 @@ def huella() -> str:
     - la forma canónica del patrón de token, con sus flags;
     - la longitud mínima, que hoy vive dentro del patrón pero debe seguir
       contando si algún día se saca de ahí;
-    - la tabla de normalización, aunque viva en `mcp_legalize`: es parte del
-      tokenizador aunque no esté en este fichero. #32 midió lo que costaría
+    - la tabla de normalización, aunque viva en `legalize_normalizacion`: es
+      parte del tokenizador aunque no esté en este fichero. #32 midió lo que costaría
       cambiarla para el sueco y se cerró aceptando el plegado, pero el día que
       se revise esta huella es lo que invalida los índices construidos antes;
     - la regla de recorte del frontmatter, que decide qué es cuerpo;
     - presencia frente a frecuencia.
     """
-    tabla = mcp_legalize._NORMALIZE_TABLE
+    tabla = legalize_normalizacion.TABLA
     partes = [
         _PATRON_TOKEN.pattern,
         str(_PATRON_TOKEN.flags),

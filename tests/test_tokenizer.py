@@ -137,11 +137,11 @@ def test_the_fingerprint_covers_the_normalization_table(monkeypatch):
     Issue #32 proposes changing exactly this for Swedish. When it does, every
     posting list built under the old folding has to be invalidated.
     """
-    import mcp_legalize
+    import legalize_normalizacion
 
     antes = tk.huella()
-    tabla = dict(mcp_legalize._NORMALIZE_TABLE)
+    tabla = dict(legalize_normalizacion.TABLA)
     tabla[ord("ö")] = ord("x")
-    monkeypatch.setattr(mcp_legalize, "_NORMALIZE_TABLE", tabla)
+    monkeypatch.setattr(legalize_normalizacion, "TABLA", tabla)
 
     assert tk.huella() != antes
