@@ -152,3 +152,150 @@ def test_the_ruleset_is_checked_even_when_the_corpus_has_no_repository(
     assert "REGLAS" in reportado
     assert "SIN GIT" in reportado
     assert salida.value.code == 1
+
+
+# ──────────────────────── a hostile root (check_updates) ─────────────────────
+#
+# `check_updates` runs git in the directory the index names as its corpus root.
+# The index is untrusted (principle II): a tampered one could name any directory
+# on disk, and a repository whose own `.git/config` runs commands —
+# `core.fsmonitor`, hooks, a pager. A clone never brings its `.git/config` from
+# upstream, so the realistic attacker is whoever can write to `indices/`.
+
+def trampa(directorio, centinela):
+    """A repository whose own configuration creates `centinela` if git obeys it."""
+    directorio.mkdir(parents=True)
+    git("init", "-q", cwd=directorio)
+    (directorio / "a.md").write_text("x", encoding="utf-8")
+    git("add", "-A", cwd=directorio)
+    git("commit", "-qm", "x", cwd=directorio)
+    ganchos = directorio / ".git" / "ganchos-hostiles"
+    ganchos.mkdir()
+    for gancho in ("post-checkout", "post-index-change", "reference-transaction", "pre-auto-gc"):
+        script = ganchos / gancho
+        script.write_text(f"#!/bin/sh\ntouch '{centinela}'\n", encoding="utf-8")
+        script.chmod(0o755)
+    git("config", "core.fsmonitor", f"touch '{centinela}'; false", cwd=directorio)
+    git("config", "core.hooksPath", str(ganchos), cwd=directorio)
+    git("config", "core.pager", f"touch '{centinela}'; cat", cwd=directorio)
+    return directorio
+
+
+@pytest.fixture
+def entorno_check(check_updates, crear_indice, tmp_path, monkeypatch):
+    indices = tmp_path / "indices"
+    indices.mkdir()
+    (tmp_path / "repos").mkdir()
+    monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
+    monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
+    monkeypatch.delenv("LEGALIZE_REPOS_DIR", raising=False)
+    llamadas = []
+    original = check_updates.legalize_repo.head_commit
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit",
+                        lambda d: llamadas.append(d) or original(d))
+
+    def indice(directorio_base):
+        crear_indice(indices / "index_legalize-xx.db", {
+            "pais_predeterminado": "xx", "directorio_base": directorio_base,
+        })
+
+    return tmp_path, indice, llamadas
+
+
+def correr(check_updates, capsys):
+    try:
+        check_updates.main()
+    except SystemExit:
+        pass
+    return capsys.readouterr().out
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "symlink"), reason="needs symlinks")
+@pytest.mark.parametrize("escape", ["absoluta", "relativa", "enlace"])
+def test_check_updates_runs_no_git_outside_the_authorised_directory(
+    check_updates, entorno_check, capsys, escape,
+):
+    raiz, indice, llamadas = entorno_check
+    centinela = raiz / "pwned"
+    hostil = trampa(raiz / "fuera" / "evil", centinela)
+    if escape == "absoluta":
+        indice(str(hostil))
+    elif escape == "relativa":
+        indice("repos/../fuera/evil")
+    else:
+        try:
+            (raiz / "repos" / "legalize-xx").symlink_to(hostil, target_is_directory=True)
+        except OSError:
+            pytest.skip("the platform refuses to create symlinks")
+        indice("repos/legalize-xx")
+
+    reportado = correr(check_updates, capsys)
+
+    assert "RAÍZ" in reportado
+    assert llamadas == []
+    assert not centinela.exists()
+
+
+def test_a_root_inside_the_authorised_directory_is_still_checked(
+    check_updates, entorno_check, capsys,
+):
+    raiz, indice, llamadas = entorno_check
+    (raiz / "repos" / "legalize-xx").mkdir()
+    indice("repos/legalize-xx")
+
+    reportado = correr(check_updates, capsys)
+
+    assert "RAÍZ" not in reportado
+    assert len(llamadas) == 1
+
+
+def test_the_authorised_directory_follows_legalize_repos_dir(
+    check_updates, entorno_check, capsys, monkeypatch,
+):
+    """The same directory the server serves from, chosen by the operator."""
+    raiz, indice, llamadas = entorno_check
+    otro = raiz / "otros-repos" / "legalize-xx"
+    otro.mkdir(parents=True)
+    monkeypatch.setenv("LEGALIZE_REPOS_DIR", str(raiz / "otros-repos"))
+    indice(str(otro))
+
+    reportado = correr(check_updates, capsys)
+
+    assert "RAÍZ" not in reportado
+    assert len(llamadas) == 1
+
+
+def test_head_commit_obeys_no_command_from_the_repository_config(tmp_path):
+    """Second barrier: even an authorised repository cannot make git run its
+    configuration. The trap is checked to be armed first, so a pass means git
+    was told not to obey it, not that the trap was broken."""
+    centinela = tmp_path / "pwned"
+    repo = trampa(tmp_path / "repo", centinela)
+    git("status", cwd=repo)
+    assert centinela.exists(), "la trampa no está armada"
+    centinela.unlink()
+
+    assert len(legalize_repo.head_commit(repo)) == 40
+    assert not centinela.exists()
+
+
+def test_head_commit_disables_the_config_that_runs_commands(repo_git, monkeypatch):
+    """`rev-parse` does not refresh the index today, so the trap above stays
+    quiet either way. This pins the overrides themselves, so they cannot be
+    dropped in a refactor without a test noticing."""
+    vistos = []
+    real = subprocess.run
+
+    def espia(args, **kw):
+        vistos.append((args, kw.get("env") or {}))
+        return real(args, **kw)
+
+    monkeypatch.setattr(legalize_repo.subprocess, "run", espia)
+    legalize_repo.head_commit(repo_git)
+
+    assert vistos
+    for args, env in vistos:
+        assert "core.fsmonitor=false" in args
+        assert any(a.startswith("core.hooksPath=") for a in args)
+        assert env.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert env.get("GIT_PAGER") == "cat"
