@@ -34,10 +34,10 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 ## Phase 1: Setup
 
-- [ ] T001 Ejecutar `.venv/bin/python -m pytest -rs` y `scripts/update_index.py --self-test`
+- [X] T001 Ejecutar `.venv/bin/python -m pytest -rs` y `scripts/update_index.py --self-test`
   en `main`. Anotar la línea base (hoy 576 tests, 2 skips) en la sección Notes de
   `specs/002-indice-sqlite/tasks.md`.
-- [ ] T002 Crear el script del banco de paridad
+- [X] T002 Crear el script del banco de paridad
   `specs/002-indice-sqlite/paridad/banco.py`. Recibe un directorio de índices y una salida
   JSON, y ejecuta por corpus (es, se, fr, eu) una lista fija de peticiones con sus respuestas
   completas vía `model_dump()`:
@@ -52,7 +52,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   - los errores: país desconocido, ley inexistente, id ambiguo.
 
   Determinista y sin dependencias nuevas.
-- [ ] T003 Generar la referencia: crear un worktree de `main` en el scratchpad, ejecutar
+- [X] T003 Generar la referencia: crear un worktree de `main` en el scratchpad, ejecutar
   `banco.py` contra `indices/` con el código de `main` y guardar
   `specs/002-indice-sqlite/paridad/referencia-main.json`. Si pasa de 5 MB, se guarda fuera del
   repo y se registran solo el resumen y su sha256. Anotar el commit de `main` y el de cada
@@ -396,6 +396,6 @@ Cada una pasa la CI por sí sola.
 
 ## Notes
 
-- Línea base (T001): _pendiente_
-- Referencia de paridad (T003): _pendiente_
+- Línea base (T001, 2026-10-18): 576 passed, 2 skipped; self-test OK (huella 03446b5a64e4). `main` en cc72413.
+- Referencia de paridad (T003): 1.178 peticiones (191 buscar_ley, 96 contar_leyes, 162 obtener_ley, 720 obtener_articulo, 9 de listado), 0 excepciones, generada con `main` cc72413 sobre los corpus es c1b7254a, se 0e6c4b6, fr e38417f, eu 46c90a58. `paridad/referencia-main.json` (3,7 MB, ignorado por git), sha256 fa3f780975e8991c…
 - Mediciones (T028, T031, T034, T040): _pendiente_
