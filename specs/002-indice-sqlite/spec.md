@@ -291,8 +291,12 @@ repetidas con el índice nuevo: mismos resultados y ningún desborde, corte ni p
   de consulta.
 - **SC-006**: La búsqueda por frase devuelve solo documentos que contienen la frase en el 100%
   de los casos del banco.
-- **SC-007**: Indexar el corpus español completo no tarda más ni ocupa más memoria que hoy
-  (150 s y 4,15 GB). El tamaño en disco queda registrado.
+- **SC-007**: Indexar el corpus español completo no ocupa más memoria que hoy (4,15 GB) y no
+  tarda más de un 40 % más (150 s hoy). El tamaño en disco queda registrado. *Revisado el
+  2026-10-18 con el usuario:* el criterio original pedía «no tarda más», y la medición dio
+  201 s (+34 %), por la escritura del texto buscable y la localización de los artículos, un
+  trabajo que antes no existía. Se aceptó a cambio de 7,5 veces menos memoria, y porque el
+  indexado completo solo se hace al migrar o al cambiar las reglas.
 - **SC-008**: En el corpus sueco, el 100% de las apariciones de un número de artículo
   repetido se pueden obtener eligiendo su ubicación.
 
