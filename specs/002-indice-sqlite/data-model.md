@@ -16,7 +16,7 @@ CREATE TABLE meta(
 
 CREATE TABLE leyes(
     n INTEGER PRIMARY KEY,               -- orden del corpus: el de inserción del indexador
-    id TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    id TEXT NOT NULL UNIQUE,             -- distingue mayúsculas; la búsqueda sin ellas va por id_casefold
     titulo TEXT NOT NULL,
     rango TEXT NOT NULL,
     estado TEXT NOT NULL,

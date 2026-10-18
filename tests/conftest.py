@@ -91,3 +91,60 @@ def indexer_cli(tmp_path):
         )
 
     return SimpleNamespace(repo=repo, indice=indice, correr=correr)
+
+
+@pytest.fixture
+def instalar_corpus(tmp_path, monkeypatch):
+    """Installs a real per-corpus index database and registers it in the server.
+
+    Spec 002 moved the index from dictionaries in memory to a SQLite database
+    per corpus. Tests used to inject dictionaries into `_DOCS_POR_PAIS`; they now
+    describe the same documents and this fixture writes them with the indexer's
+    own writer, so every test exercises the real database rather than a
+    stand-in.
+
+    `instalar(pais, documentos, cuerpos=None, meta=None)`:
+    - `documentos`: `{id: entry}` with the keys the JSON index had
+      (`titulo`, `rango`, `_ruta`, ...);
+    - `cuerpos`: `{id: body}`; each is also written to its `_ruta` under a
+      temporary `LEGALIZE_REPOS_DIR`, so `obtener_ley` reads it from disk;
+    - `meta`: extra meta entries (for example a different `tokenizador`).
+
+    Can be called more than once to install several countries. The server's
+    tables are restored after the test.
+    """
+    import legalize_indice
+    import legalize_tokenizer
+    import mcp_legalize
+
+    repos = tmp_path / "repos"
+    indices = tmp_path / "indices_instalados"
+    monkeypatch.setattr(mcp_legalize, "REPOS_DIR", repos)
+    for tabla in ("_CONEXIONES", "_META_POR_PAIS", "_INDEX_FILE_POR_PAIS",
+                  "_RAIZ_POR_PAIS", "_TEXTO_NO_DISPONIBLE"):
+        monkeypatch.setattr(mcp_legalize, tabla, {})
+
+    def instalar(pais, documentos, cuerpos=None, meta=None):
+        cuerpos = cuerpos or {}
+        raiz = repos / f"legalize-{pais}"
+        raiz.mkdir(parents=True, exist_ok=True)
+        escritor = legalize_indice.Escritor(legalize_indice.ruta_indice(indices, f"legalize-{pais}"))
+        for doc_id, entry in documentos.items():
+            entry = {"pais": pais, **entry}
+            cuerpo = cuerpos.get(doc_id, "")
+            ruta = entry.get("_ruta")
+            if isinstance(ruta, str) and ruta and not ruta.startswith("/") and ".." not in ruta:
+                destino = raiz / ruta
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                destino.write_text(cuerpo, encoding="utf-8")
+            escritor.poner_ley(doc_id, entry, cuerpo)
+        datos_meta = {"pais_predeterminado": pais, "directorio_base": str(raiz),
+                      "tokenizador": legalize_tokenizer.huella(), **(meta or {})}
+        for clave, valor in datos_meta.items():
+            escritor.poner_meta(clave, valor)
+        escritor.confirmar()
+        mcp_legalize._registrar_indice(
+            legalize_indice.ruta_indice(indices, f"legalize-{pais}"), repos.resolve())
+        return raiz
+
+    return instalar

@@ -33,9 +33,9 @@ from mcp_legalize import ArticuloResultado
 
 
 @pytest.fixture
-def ley(monkeypatch):
+def ley(instalar_corpus, monkeypatch):
     """One law whose body each test supplies."""
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", {
+    instalar_corpus("xx", {
         "XX-1": {"titulo": "Ley de prueba", "pais": "xx", "_ruta": "xx/1.md"},
     })
     cuerpo = {}

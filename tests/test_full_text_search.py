@@ -10,28 +10,18 @@ index built in part 2.
 questions, and collapsing them would make one call mean two things. Every
 existing call keeps working, which is the bar #30 already met.
 
-**Loaded lazily, per corpus.** The postings file is 75.8 MB for the Spanish corpus
-and 9.3 MB for the Swedish one (spec 001, research.md R1). Loading every one at import would charge a cost at
-startup that a deployment whose clients never search by text would never use —
-the same reasoning already accepted for the normalization cache in #15, with
-larger stakes.
-
-**Ordering, decided in #31 question 4 and measured there**: the text
-intersection runs first because it is the cheapest and most selective step (0.08
-ms, and it can cut the candidate set by 95%), then the cheap string comparisons,
-then the normalizing ones. `texto` therefore replaces `_iter_docs` as the source
-of candidates rather than joining the filter chain.
+**Served from the corpus database (spec 002).** The body is a full-text table
+in each corpus's SQLite database, so there is nothing to load lazily: the query
+goes to it directly, and the terms reach it quoted, as text, never as syntax.
+Lazy loading of the old postings, and the tests that pinned it, went with them.
 """
 
 import pickle
+import sqlite3
 
 import pytest
 
-import legalize_postings
-import legalize_tokenizer
 import mcp_legalize
-
-GENERACION = "a" * 32
 
 
 def documento(**campos):
@@ -46,33 +36,21 @@ def documento(**campos):
 
 
 @pytest.fixture
-def corpus(tmp_path, monkeypatch):
-    """Un país con su índice invertido en disco, como lo deja el indexador."""
+def corpus(instalar_corpus):
+    """Un país con el texto de cada ley buscable, como lo deja el indexador."""
     docs = {
         "ARRENDA": documento(titulo="Ley de arrendamientos", estado="in_force"),
         "TELE": documento(titulo="Ley del teletrabajo", estado="repealed"),
         "AMBAS": documento(titulo="Ley mixta", estado="in_force"),
         "NINGUNA": documento(titulo="Ley aparte", estado="in_force"),
     }
-    postings = {
-        "arrendamiento": ["ARRENDA", "AMBAS"],
-        "urbano": ["ARRENDA"],
-        "teletrabajo": ["TELE", "AMBAS"],
+    cuerpos = {
+        "ARRENDA": "Del arrendamiento urbano.",
+        "TELE": "Del teletrabajo.",
+        "AMBAS": "Del arrendamiento y del teletrabajo.",
+        "NINGUNA": "Otra materia.",
     }
-    indices = tmp_path / "indices"
-    indices.mkdir(parents=True, exist_ok=True)
-    # Escritos como los deja el indexador: formato sin código, sello real del
-    # tokenizador y la generación que los ata al índice JSON (spec 001).
-    legalize_postings.escribir(
-        legalize_postings.ruta_postings(indices, "tst"), postings,
-        tokenizador=legalize_tokenizer.huella(), generacion=GENERACION,
-    )
-
-    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {"generacion": GENERACION})
-    monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+    instalar_corpus("tst", docs, cuerpos)
     return docs
 
 
@@ -138,62 +116,23 @@ def test_a_search_without_texto_is_unchanged(corpus):
     assert len(mcp_legalize.buscar_ley.fn(pais="tst")) == 4
 
 
-# ───────────────────────────── lazy loading ──────────────────────────────────
+# ─────────────────────────── untrusted text index ────────────────────────────
 
-def test_the_inverted_index_is_not_loaded_until_a_text_search(corpus):
-    """~85 MB per corpus must not be charged to a deployment that never uses it."""
-    mcp_legalize.buscar_ley.fn(pais="tst", estado="in_force")
-
-    assert mcp_legalize._INVERTIDO_POR_PAIS == {}
-
-
-def test_the_inverted_index_is_loaded_once(corpus, monkeypatch):
-    """A second text search must reuse the first one's load."""
-    cargas = []
-    original = mcp_legalize._cargar_invertido
-
-    def espia(pais):
-        cargas.append(pais)
-        return original(pais)
-
-    monkeypatch.setattr(mcp_legalize, "_cargar_invertido", espia)
-    mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
-    mcp_legalize.buscar_ley.fn(pais="tst", texto="teletrabajo")
-
-    assert cargas == ["tst"]
-
-
-def test_a_country_without_an_inverted_index_says_it_could_not_search(corpus, monkeypatch):
-    """A corpus indexed before part 2, or whose postings failed to write.
-
-    This test used to expect `[]`, on the reasoning that an empty list "says
-    truthfully that no document is known to contain those terms". It does not
-    say that to a client: `[]` is also exactly what a search with no matches
-    returns, so the client concluded "no law contains these words" when nobody
-    had looked (spec 001, FR-010; decision Q3, approved 2026-10-16).
-
-    The other half of the old reasoning still holds and is kept: one country
-    without postings must not break the tool for the others. That is why this
-    is an error only when the search was limited to the country that cannot
-    answer — searching every country still returns the others' results.
-    """
-    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", corpus and mcp_legalize.INDICES_DIR.parent / "vacio")
-
-    resultado = mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
-
-    assert isinstance(resultado, mcp_legalize.ErrorRespuesta)
-    assert "tst: sin_postings" in resultado.sugerencias
-
-
-def test_a_corrupt_inverted_index_is_reported_instead_of_raising(corpus, tmp_path, monkeypatch):
-    """The postings are untrusted input like the JSON index — #18's lesson.
+def test_a_corrupt_inverted_index_is_reported_instead_of_raising(corpus):
+    """The text index is untrusted input like the rest of the index — #18's lesson.
 
     Still never an exception. What changed (spec 001, FR-010; approved
     2026-10-16) is that the answer is no longer `[]`, which a client cannot tell
     from "no matches": it is an error naming the country and why.
     """
-    (mcp_legalize.INDICES_DIR / "inverted_tst.postings").write_bytes(b"no soy unos postings")
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+    ruta = mcp_legalize._CONEXIONES["tst"].execute("PRAGMA database_list").fetchone()[2]
+    con = sqlite3.connect(ruta)
+    # Quien manipula el índice usa un SQLite sin modo defensivo. Sin las hojas
+    # del texto buscable, el esquema sigue intacto y el daño aparece al consultar.
+    con.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, False)
+    con.execute("DELETE FROM cuerpo_data WHERE id > 10")
+    con.commit()
+    con.close()
 
     resultado = mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
 
@@ -223,10 +162,10 @@ def test_a_malicious_old_bin_runs_nothing_on_a_text_search(corpus, tmp_path, mon
     recognised by its name and never opened.
     """
     centinela = tmp_path / "pwned"
-    (mcp_legalize.INDICES_DIR / "inverted_tst.bin").write_bytes(
-        pickle.dumps(_Centinela(centinela))
-    )
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+    indices = tmp_path / "indices"
+    indices.mkdir()
+    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
+    (indices / "inverted_tst.bin").write_bytes(pickle.dumps(_Centinela(centinela)))
 
     mcp_legalize.buscar_ley.fn(pais="tst", texto="arrendamiento")
 

@@ -94,12 +94,17 @@ def test_documents_keep_the_order_they_were_written_in(indice):
     assert list(li.como_dict(indice)["documentos"]) == ["TST-A", "TST-B"]
 
 
-def test_ids_are_unique_without_regard_to_case(tmp_path):
-    escritor = li.Escritor(li.ruta_indice(tmp_path, "tst"))
+def test_ids_that_differ_only_in_case_are_two_laws(tmp_path):
+    """The indexer's duplicate rule is case-sensitive, and the corpus decides the
+    ids: a uniqueness that ignored case would make one crafted file abort the
+    whole corpus. Both live; the server resolves the tie (defect #4)."""
+    ruta = li.ruta_indice(tmp_path, "tst")
+    escritor = li.Escritor(ruta)
     escritor.poner_ley("TST-A", campos(), CUERPO_A)
+    escritor.poner_ley("tst-a", campos(), CUERPO_B)
+    escritor.confirmar()
 
-    with pytest.raises(sqlite3.IntegrityError):
-        escritor.poner_ley("tst-a", campos(), CUERPO_A)
+    assert list(li.como_dict(ruta)["documentos"]) == ["TST-A", "tst-a"]
 
 
 def test_an_absent_text_state_is_stored_resolved(tmp_path):

@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Optional
@@ -36,7 +37,7 @@ from pydantic import BaseModel
 import legalize_articulos
 import legalize_frontmatter
 import legalize_normalizacion
-import legalize_postings
+import legalize_indice
 import legalize_tokenizer
 import legalize_injection
 
@@ -148,7 +149,7 @@ class ArticuloResultado(BaseModel):
 class PaisNoConsultado(BaseModel):
     """Un país donde la búsqueda por texto no se pudo hacer, y por qué.
 
-    `motivo` es uno de los de `legalize_postings.MOTIVOS` o
+    `motivo` es `sin_postings`, `ilegibles`, `tokenizador_distinto` o
     `consulta_sin_terminos`, cuando ningún término de la consulta llega a la
     longitud mínima del tokenizador.
     """
@@ -204,79 +205,42 @@ class ErrorRespuesta(BaseModel):
 # ─────────────────────────── Normalización (necesaria antes de cargar índices) ──
 
 # La tabla de plegado vive en `legalize_normalizacion`, compartida con el
-# tokenizador. Se conserva el nombre `_normalize` porque es el que usa todo este
-# módulo y el que espían los tests de la caché.
+# tokenizador. El servidor ya no pliega títulos al consultar —se guardan
+# plegados al indexar (spec 002)—; el alias queda por los tests que lo usan.
 _normalize = legalize_normalizacion.normalizar
 
 
-# Clave del campo normalizado que `_campo_normalizado` guarda dentro del propio
-# documento. Lleva guion bajo como el resto de campos que añade el indexador y
-# que no vienen del frontmatter.
-_SUFIJO_NORM = "_norm"
+# ─────────────────────────── Carga de índices ────────────────────────────────
 
-def _campo_normalizado(doc: dict, campo: str) -> str:
-    """La forma normalizada de un campo del documento, calculada una sola vez.
-
-    `buscar_ley` comparaba normalizando en cada petición: sobre el corpus
-    español eso eran 12.291 títulos pasados por `.lower()` y una tabla de 30
-    entradas, 886 ms de una petición de 896 — el 99,3% del trabajo — y nada se
-    reutilizaba entre llamadas.
-
-    El `break` por `limite` lo escondía, porque solo salta cuando SÍ hay
-    resultados: una consulta con cien coincidencias costaba 12 ms y una sin
-    ninguna costaba 900, y `limite=1` costaba lo mismo que `limite=100`.
-
-    La caché es perezosa a propósito. Precomputar al cargar añadía ~0,9 s al
-    arranque de cada jurisdicción aunque ningún cliente buscara por título;
-    así el arranque no cambia y quien no busca por texto no paga nada.
-
-    Vive dentro del documento y no en un dict aparte para que no pueda quedarse
-    obsoleta: recargar el índice reemplaza el documento y con él su caché. Una
-    caché indexada por id sobreviviría al reemplazo y serviría el título viejo.
-    """
-    clave = campo + _SUFIJO_NORM
-    cached = doc.get(clave)
-    if cached is None:
-        cached = doc[clave] = _normalize(doc.get(campo, ""))
-    return cached
-
-
-# ─────────────────────────── Carga Dinámica de Índices ────────────────────────
-
-# Los documentos se guardan como dicts crudos. Pydantic solo se usa al serializar
-# respuestas, y eso NO es por coste: validar los 12.291 documentos españoles con
-# un modelo cuesta 0,17 s y 15 MB sobre un arranque de 2,67 s. El motivo por el
-# que este comentario decía otra cosa es que Pydantic v2 movió su núcleo a Rust.
+# Un índice por corpus: una base de datos SQLite que escribe y abre
+# `legalize_indice` (spec 002). Antes cada corpus era un JSON cargado entero en
+# memoria, con sus postings aparte; medido sobre el corpus español, la base de
+# datos responde con 27 MB residentes frente a 363 y en menos de un
+# milisegundo, y nada se carga al arrancar más que el esquema.
 #
-# La razón real es la política ante un documento malformado. Un modelo lanzaría
-# ValidationError al cargar, que aquí significa rechazar el índice entero por
-# culpa de una entrada. Este servidor hace lo contrario a propósito: `_bytes_de`
-# degrada a 0, `_truncar_metadatos` recorta, `_load_indices` descarta la entrada
-# y conserva el resto. Es la regla que fijó `_read_file` — una ley ilegible
-# degrada a texto vacío, no a un fallo — y la que cerró #14 y #18.
-#
-# Fallar pronto y fuerte es correcto en una API HTTP, donde se rechaza la
-# petición y no se pierde nada. Sobre un corpus de 12.291 documentos, donde uno
-# viene torcido, deja al cliente sin los otros 12.290. Los `isinstance` de este
-# módulo no son validación que Pydantic pudiera ahorrarse: son esa política.
-_DOCS_POR_PAIS: dict[str, dict[str, dict]] = {}
+# El servidor reconstruye cada ley como el diccionario que tenía el JSON
+# (`legalize_indice.fila_a_doc`), así que `_doc_resumen`, `_resolve_ruta`,
+# `_wrap_untrusted` y los demás ayudantes no cambian. La política ante un dato
+# malformado tampoco (ADR 0002): el escritor degrada cada campo al escribirlo,
+# y una base de datos que no supera `abrir` cuesta ese corpus y ninguno más.
+_CONEXIONES: dict = {}
 _META_POR_PAIS: dict[str, dict] = {}
 _INDEX_FILE_POR_PAIS: dict[str, str] = {}
 # La raíz de cada corpus, resuelta y comprobada contra LEGALIZE_REPOS_DIR al
 # cargar el índice. `_resolve_ruta` la lee de aquí y no de `_meta`, que es del
 # índice y por tanto del atacante (spec 001, US2).
 _RAIZ_POR_PAIS: dict[str, Path] = {}
+# Países cuyo texto no se puede buscar, con el motivo: un índice construido con
+# otro tokenizador, o uno cuya consulta de texto falló. El resto del país se
+# sigue sirviendo.
+_TEXTO_NO_DISPONIBLE: dict[str, str] = {}
 
-# Índices invertidos ya cargados, por país. A diferencia de los otros tres, este
-# NO se llena al arrancar: son 176 MB residentes por el corpus español y 45 MB por
-# el sueco (medido en spec 001, research.md R1), y un despliegue cuyos clientes
-# nunca busquen por texto no tiene por qué pagarlos. Es la misma decisión que se
-# tomó para la caché de normalización, con bastante más en juego.
-#
-# El valor es `(postings, motivo)`: o unos postings utilizables y `None`, o
-# `None` y el motivo por el que no lo son. Se guarda también el fallo, para no
-# reintentar en cada consulta abrir un fichero que no está.
-_INVERTIDO_POR_PAIS: dict[str, tuple] = {}
+# Motivos de `sin_consultar` (contrato de la spec 002). `formato_anterior` y
+# `generacion_distinta` ya no existen: un índice en el formato anterior no se
+# sirve entero, y la generación desapareció con los postings separados.
+SIN_POSTINGS = "sin_postings"
+ILEGIBLES = "ilegibles"
+TOKENIZADOR_DISTINTO = "tokenizador_distinto"
 
 
 _PAIS_NOMBRE = {
@@ -341,89 +305,69 @@ def _load_indices():
     # Los nombres de índice y los códigos de país vienen de fuera: todo mensaje
     # los formatea con !r, para que un salto de línea en ellos no pueda fabricar
     # líneas falsas en el registro (FR-016).
-    for index_path in sorted(INDICES_DIR.glob("index_*.json")):
-        try:
-            with index_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                continue
+    for index_path in sorted(INDICES_DIR.glob("index_*.db")):
+        _registrar_indice(index_path, autorizada)
 
-            # `_meta` se valida igual que `documentos`: si no es un objeto, no
-            # se puede leer campo a campo y el país saldría de un `.get()` sobre
-            # un tipo que no lo tiene. Degradar a {} deja que el nombre del
-            # fichero decida el país, que es el mismo respaldo que ya existía
-            # para un `_meta` sin `pais`.
-            meta = data.get("_meta")
-            if not isinstance(meta, dict):
-                if meta is not None:
-                    print(
-                        f"[AVISO] {index_path.name!r}: '_meta' no es un objeto; "
-                        f"se ignora y el país se deduce del nombre del fichero.",
-                        file=sys.stderr,
-                    )
-                meta = {}
-            pais_code = meta.get("pais_predeterminado") or meta.get("pais") or index_path.stem.replace("index_", "")
+    # Un corpus que solo tiene el formato anterior no se sirve: hacerlo exigiría
+    # mantener dos implementaciones de cada regla (spec 002, research R8).
+    for anterior in sorted(INDICES_DIR.glob("index_*.json")):
+        if not anterior.with_suffix(".db").exists():
+            print(
+                f"[AVISO] {anterior.name!r}: formato anterior; no se sirve. Migra con: "
+                f"python scripts/update_index.py --repo <repo>",
+                file=sys.stderr,
+            )
 
-            if "documentos" in data:
-                # La raíz ya se validaba; lo que se sacaba de ella, no. Un
-                # `documentos` que no fuera un dict llegaba crudo a las
-                # herramientas: cuatro de las seis reventaban con AttributeError
-                # y, con `null`, el valor se guardaba ANTES del `len()` que
-                # fallaba, así que el `except` de abajo registraba el error
-                # sobre un diccionario ya envenenado y el cuerpo del módulo
-                # moría al sumar `_TOTAL_DOCS`. El servidor no arrancaba, y un
-                # índice sano en el mismo directorio se perdía con él.
-                docs = data["documentos"]
-                if not isinstance(docs, dict):
-                    print(
-                        f"[ERROR] {index_path.name!r}: 'documentos' no es un objeto "
-                        f"({type(docs).__name__}); índice ignorado.",
-                        file=sys.stderr,
-                    )
-                    continue
 
-                # Una entrada malformada cuesta esa entrada y nada más, que es
-                # la regla que ya siguen `_read_file` y `_bytes_de`. Descartar
-                # el fichero entero dejaría que un solo documento corrupto
-                # escondiera un corpus.
-                descartadas = [k for k, v in docs.items() if not isinstance(v, dict)]
-                if descartadas:
-                    docs = {k: v for k, v in docs.items() if isinstance(v, dict)}
-                    print(
-                        f"[AVISO] {index_path.name!r}: {len(descartadas)} entrada(s) "
-                        f"descartada(s) por no ser objetos: "
-                        f"{', '.join(map(repr, descartadas[:5]))}"
-                        f"{'…' if len(descartadas) > 5 else ''}",
-                        file=sys.stderr,
-                    )
+def _registrar_indice(index_path: Path, autorizada: Path) -> None:
+    """Abre un índice como entrada no confiable y, si lo supera, lo sirve.
 
-                # La raíz se decide aquí, una vez, y queda guardada: desde
-                # este momento `_resolve_ruta` no vuelve a leer `_meta`. Un
-                # índice cuyo corpus queda fuera del directorio autorizado
-                # cuesta ese índice y ninguno más (FR-005).
-                try:
-                    raiz = _raiz_del_corpus(meta, autorizada)
-                except ValueError as exc:
-                    print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.",
-                          file=sys.stderr)
-                    continue
+    Un índice que no se puede abrir, de otro formato o con un esquema
+    inesperado cuesta ese corpus y ninguno más (FR-005). También uno cuyo
+    corpus queda fuera del directorio autorizado: la raíz se decide aquí, una
+    vez, y desde ese momento `_resolve_ruta` no vuelve a leer `_meta`.
+    """
+    try:
+        con = legalize_indice.abrir(index_path)
+    except ValueError as exc:
+        print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.", file=sys.stderr)
+        return
+    try:
+        meta = legalize_indice.leer_meta(con)
+        pais_code = (meta.get("pais_predeterminado") or meta.get("pais")
+                     or index_path.stem.replace("index_", ""))
+        if not isinstance(pais_code, str):
+            pais_code = index_path.stem.replace("index_", "")
+        raiz = _raiz_del_corpus(meta, autorizada)
+        total = con.execute("SELECT count(*) FROM leyes").fetchone()[0]
+    except ValueError as exc:
+        print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.", file=sys.stderr)
+        con.close()
+        return
+    except Exception as exc:
+        print(f"[ERROR] No se pudo cargar {index_path.name!r}: {exc}", file=sys.stderr)
+        con.close()
+        return
 
-                _DOCS_POR_PAIS[pais_code] = docs
-                _META_POR_PAIS[pais_code] = meta
-                _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
-                _RAIZ_POR_PAIS[pais_code] = raiz
-
-                print(
-                    f"[Legalize MCP] [{pais_code.upper()!r}] {len(docs):,} docs "
-                    f"desde {index_path.name!r}",
-                    file=sys.stderr,
-                )
-        except Exception as exc:
-            print(f"[ERROR] No se pudo cargar {index_path.name!r}: {exc}", file=sys.stderr)
+    _CONEXIONES[pais_code] = con
+    _META_POR_PAIS[pais_code] = meta
+    _INDEX_FILE_POR_PAIS[pais_code] = index_path.stem
+    _RAIZ_POR_PAIS[pais_code] = raiz
+    if meta.get("tokenizador") != legalize_tokenizer.huella():
+        # El texto se plegó con otras reglas: buscar con las actuales daría
+        # resultados que no corresponden. El resto del corpus sí se sirve.
+        _TEXTO_NO_DISPONIBLE[pais_code] = TOKENIZADOR_DISTINTO
+        print(f"[AVISO] {index_path.name!r}: construido con otro tokenizador; la búsqueda "
+              f"por texto no está disponible ahí. Regenéralo con update_index.py.",
+              file=sys.stderr)
+    print(
+        f"[Legalize MCP] [{pais_code.upper()!r}] {total:,} docs desde {index_path.name!r}",
+        file=sys.stderr,
+    )
 
 _load_indices()
-_TOTAL_DOCS = sum(len(d) for d in _DOCS_POR_PAIS.values())
-print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_DOCS_POR_PAIS)} jurisdicción(es).", file=sys.stderr)
+_TOTAL_DOCS = sum(c.execute("SELECT count(*) FROM leyes").fetchone()[0] for c in _CONEXIONES.values())
+print(f"[Legalize MCP] Total: {_TOTAL_DOCS:,} documentos en {len(_CONEXIONES)} jurisdicción(es).", file=sys.stderr)
 
 
 # ─────────────────────────── Helpers ─────────────────────────────────────────
@@ -697,126 +641,31 @@ def _strip_frontmatter(content: str) -> str:
 # Qué decirle al operador según el motivo por el que unos postings no sirven.
 # Ninguno es un error del servidor: el país sigue respondiendo a todo lo que no
 # sea búsqueda por texto.
-_AVISO_POSTINGS = {
-    legalize_postings.FORMATO_ANTERIOR:
-        "formato anterior de postings (pickle), no se carga. Regenéralo",
-    legalize_postings.ILEGIBLES:
-        "postings ilegibles o con estructura inesperada; la búsqueda por texto no está "
-        "disponible. Regenéralos",
-    legalize_postings.TOKENIZADOR_DISTINTO:
-        "postings construidos con otro tokenizador. Regenéralos",
-    legalize_postings.GENERACION_DISTINTA:
-        "postings de otra generación que su índice JSON. Regenéralos",
-}
-
-def _cargar_invertido(pais: str) -> tuple:
-    """Carga los postings de un país la primera vez que hace falta.
-
-    Devuelve `(postings, None)` o `(None, motivo)`, con el motivo que decide
-    `legalize_postings.estado`. Un país sin postings utilizables no es un error:
-    sigue respondiendo a todo lo que no sea búsqueda por texto. Devolver un error
-    rompería la herramienta para todos los países por culpa de uno.
-
-    Antes esto hacía `pickle.load` sobre el `.bin`, que el comentario de al lado
-    declaraba entrada no fiable: quien pudiera escribir en `indices/` ejecutaba
-    código en la primera búsqueda por texto. El formato nuevo es texto plano y el
-    `.bin` ya no se abre nunca (spec 001).
-    """
-    nombre = _INDEX_FILE_POR_PAIS.get(pais, "")
-    if not nombre:
-        return None, legalize_postings.SIN_POSTINGS
-    repo = nombre.removeprefix("index_")
-    meta = _META_POR_PAIS.get(pais, {})
-    postings, motivo = legalize_postings.estado(
-        INDICES_DIR, repo, legalize_tokenizer.huella(), meta.get("generacion"),
-    )
-    aviso = _AVISO_POSTINGS.get(motivo)
-    if aviso:
-        # !r en el nombre del fichero: viene del nombre del índice, que no
-        # controlamos, y no puede fabricar líneas falsas en el log.
-        # Con el formato anterior el fichero que está es el `.bin`, y es el que
-        # hay que nombrar: el `.postings` precisamente no existe.
-        ruta = (legalize_postings.ruta_formato_anterior if motivo == legalize_postings.FORMATO_ANTERIOR
-                else legalize_postings.ruta_postings)
-        fichero = ruta(INDICES_DIR, repo).name
-        print(
-            f"[AVISO] {fichero!r}: {aviso} con: "
-            f"python scripts/update_index.py --repo <repo de {pais!r}>",
-            file=sys.stderr,
-        )
-    return postings, motivo
-
-def _invertido(pais: str):
-    """Los postings utilizables de un país, o None. Se cargan una sola vez."""
-    if pais not in _INVERTIDO_POR_PAIS:
-        _INVERTIDO_POR_PAIS[pais] = _cargar_invertido(pais)
-    postings, motivo = _INVERTIDO_POR_PAIS[pais]
-    if postings is not None and postings.motivo is not None:
-        return None
-    return postings
-
-def _docs_con_texto(pais: str, consulta: str) -> set[str] | None:
-    """Los ids del país que contienen TODOS los términos de la consulta.
-
-    Intersección, no unión: quien busca "arrendamiento urbano" quiere los
-    documentos donde aparecen los dos, no la suma de los que llevan cualquiera
-    de ellos, que sobre este corpus sería casi todo.
-
-    Devuelve None si el país no tiene índice invertido, para que quien llama
-    pueda distinguir "no hay con qué buscar" de "no hay resultados".
-    """
-    postings = _invertido(pais)
-    if postings is None:
-        return None
-    # Se tokeniza la consulta con las mismas reglas que construyeron el índice.
-    # Si divergieran, buscar "PROTECCIÓN" no encontraría lo que se indexó como
-    # "proteccion" — la clase de discrepancia que A2 cerró para el frontmatter.
-    terminos = legalize_tokenizer.tokens(consulta)
-    if not terminos:
-        return None
-    # La intersección va sobre posiciones enteras de la tabla de ids, y solo
-    # al final se traducen a ids: los conjuntos de enteros se cruzan más rápido
-    # que los de cadenas.
-    encontrados = None
-    try:
-        for termino in terminos:
-            indices = postings.indices(termino)
-            encontrados = indices if encontrados is None else encontrados & indices
-            if not encontrados:
-                return set()
-    except ValueError:
-        # Una lista corrupta se descubre al decodificarla. El objeto queda
-        # marcado como ilegible y el país deja de ofrecer búsqueda por texto.
-        print(f"[AVISO] Postings de {pais!r} ilegibles al consultar; "
-              f"la búsqueda por texto no está disponible ahí.", file=sys.stderr)
-        return None
-    return {postings.ids[i] for i in encontrados}
-
 # Motivo propio de la consulta, no de los postings: ningún término llega a la
 # longitud mínima del tokenizador.
 CONSULTA_SIN_TERMINOS = "consulta_sin_terminos"
 
-def _motivo_sin_texto(pais: str) -> str:
-    """Por qué no se pudo buscar por texto en un país ya intentado.
+_SELECT_LEY = "SELECT " + ", ".join(legalize_indice.COLUMNAS_LEY) + " FROM leyes"
 
-    Sale del estado guardado al cargar sus postings o, si se cargaron bien pero
-    una lista resultó corrupta al decodificarla, del propio objeto.
-    """
-    postings, motivo = _INVERTIDO_POR_PAIS.get(pais, (None, legalize_postings.SIN_POSTINGS))
-    if motivo:
-        return motivo
-    if postings is not None and postings.motivo:
-        return postings.motivo
-    return legalize_postings.SIN_POSTINGS
+
+def _motivo_sin_texto(pais: str) -> str | None:
+    """Por qué no se puede buscar por texto en un país, o None si se puede."""
+    if pais not in _CONEXIONES:
+        return SIN_POSTINGS
+    return _TEXTO_NO_DISPONIBLE.get(pais)
+
+
+def _paises(pais: str = "") -> list[str]:
+    """Los países que recorre una consulta, en el orden de los ficheros de índice."""
+    return [pais] if pais and pais in _CONEXIONES else list(_CONEXIONES)
+
 
 def _iter_docs(pais: str = ""):
-    if pais and pais in _DOCS_POR_PAIS:
-        for doc_id, doc in _DOCS_POR_PAIS[pais].items():
-            yield pais, doc_id, doc
-    else:
-        for pais_code, docs in _DOCS_POR_PAIS.items():
-            for doc_id, doc in docs.items():
-                yield pais_code, doc_id, doc
+    """(pais, id, doc) de cada ley, en el orden del corpus."""
+    for pais_code in _paises(pais):
+        for fila in _CONEXIONES[pais_code].execute(_SELECT_LEY + " ORDER BY n"):
+            yield pais_code, fila[0], legalize_indice.fila_a_doc(fila)
+
 
 def _resolve_ley(id_ley: str, pais: str = ""):
     """Resuelve un id (exacto o parcial) a (pais_code, doc_id, doc_dict, None).
@@ -847,31 +696,31 @@ def _resolve_ley(id_ley: str, pais: str = ""):
     if pedido.casefold().endswith(".md"):
         pedido = pedido[:-3]
     clave = pedido.casefold()
-    paises_a_buscar = [pais] if pais and pais in _DOCS_POR_PAIS else list(_DOCS_POR_PAIS.keys())
+    paises_a_buscar = _paises(pais)
 
     for pais_code in paises_a_buscar:
-        docs = _DOCS_POR_PAIS[pais_code]
-        if pedido in docs:
-            return pais_code, pedido, docs[pedido], None
+        con = _CONEXIONES[pais_code]
+        fila = con.execute(_SELECT_LEY + " WHERE id = ? COLLATE BINARY", (pedido,)).fetchone()
+        if fila:
+            return pais_code, fila[0], legalize_indice.fila_a_doc(fila), None
 
-        iguales = [(k, v) for k, v in docs.items() if k.casefold() == clave]
+        iguales = con.execute(_SELECT_LEY + " WHERE id_casefold = ? ORDER BY n", (clave,)).fetchall()
         if len(iguales) == 1:
-            k, v = iguales[0]
-            return pais_code, k, v, None
+            return pais_code, iguales[0][0], legalize_indice.fila_a_doc(iguales[0]), None
         if len(iguales) > 1:
             return None, None, None, ErrorRespuesta(
                 error="ID ambiguo: coincide con más de una ley si se ignoran mayúsculas.",
-                sugerencias=[_sanitize_metadata(k, max_len=200) for k, _ in iguales[:10]],
+                sugerencias=[_sanitize_metadata(f[0], max_len=200) for f in iguales[:10]],
             )
 
-        matches = [(k, v) for k, v in docs.items() if clave in k.casefold()]
+        matches = con.execute(_SELECT_LEY + " WHERE instr(id_casefold, ?) > 0 ORDER BY n LIMIT 11",
+                              (clave,)).fetchall()
         if len(matches) == 1:
-            k, v = matches[0]
-            return pais_code, k, v, None
+            return pais_code, matches[0][0], legalize_indice.fila_a_doc(matches[0]), None
         if len(matches) > 1 and len(paises_a_buscar) == 1:
             return None, None, None, ErrorRespuesta(
                 error="ID ambiguo: coincide con más de una ley.",
-                sugerencias=[_sanitize_metadata(m[0], max_len=200) for m in matches[:10]],
+                sugerencias=[_sanitize_metadata(f[0], max_len=200) for f in matches[:10]],
             )
 
     return None, None, None, ErrorRespuesta(
@@ -929,16 +778,21 @@ de la propia norma. No infieras el idioma del contenido a partir de la clave.
 
 @mcp.tool()
 def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
-    if not _DOCS_POR_PAIS:
+    if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
     resultado = []
-    for pais_code, docs in _DOCS_POR_PAIS.items():
-        total_bytes = sum(_bytes_de(d) for d in docs.values())
+    for pais_code, con in _CONEXIONES.items():
+        # `total` y no `sum`: `sum` lanza al desbordar, y dos tamaños manipulados
+        # tiraban la única herramienta sin argumentos. Solo cuentan los enteros,
+        # la regla de `_bytes_de`: un texto, un real o un blob valen 0 (#14).
+        total, total_bytes = con.execute(
+            "SELECT count(*), total(CASE WHEN typeof(bytes) = 'integer' THEN bytes END) FROM leyes"
+        ).fetchone()
         resultado.append(PaisInfo(
             codigo=pais_code,
             nombre=_PAIS_NOMBRE.get(pais_code, pais_code.upper()),
-            total_documentos=len(docs),
+            total_documentos=total,
             total_megabytes=round(total_bytes / 1_048_576, 1),
             indice=_INDEX_FILE_POR_PAIS.get(pais_code, f"index_{pais_code}"),
         ))
@@ -950,100 +804,65 @@ def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
 # parser de frontmatter y un solo vocabulario de inyección: dos copias de la
 # misma regla divergen, y aquí divergir significaría que el conteo describe una
 # consulta distinta de la que el cliente está a punto de ejecutar.
-def _filtrar_docs(
+def _consultas(
     consulta: str, texto: str, pais: str, rango: str, estado: str, anno: str,
     jurisdiccion: str, departamento: str, fecha_desde: str, fecha_hasta: str,
     derogada_desde: str, derogada_hasta: str,
     actualizada_desde: str, actualizada_hasta: str,
-    sin_consultar: list | None = None,
-):
-    """Genera (pais_code, doc_id, doc) para cada documento que pasa los filtros.
+    sin_consultar: list,
+) -> list[tuple[str, str, list]]:
+    """`(pais, where, parametros)` de cada país que la consulta debe recorrer.
 
-    Si se pasa `sin_consultar`, se rellena con `(pais, motivo)` por cada país
-    pedido donde la búsqueda por texto no pudo hacerse. Lo decide este mismo
-    generador y no cada herramienta por su cuenta, para que `buscar_ley` y
-    `contar_leyes` no puedan describir consultas distintas (FR-012). Se rellena
-    antes del primer documento, así que vale aunque quien itera corte pronto.
+    Rellena `sin_consultar` con `(pais, motivo)` por cada país pedido donde la
+    búsqueda por texto no puede hacerse, antes de devolver nada, y lo deja
+    fuera. `buscar_ley` y `contar_leyes` salen de aquí los dos, para que no
+    puedan describir consultas distintas (FR-012).
     """
-    if sin_consultar is None:
-        sin_consultar = []
-    q_norm            = _normalize(consulta)     if consulta     else ""
-    rango_norm        = _normalize(rango)        if rango        else ""
-    estado_norm       = _normalize(estado)       if estado       else ""
-    jurisdiccion_norm = _normalize(jurisdiccion) if jurisdiccion else ""
-    departamento_norm = _normalize(departamento) if departamento else ""
-    anno_clean              = anno.strip()
-    fecha_desde_clean       = fecha_desde.strip()
-    fecha_hasta_clean       = fecha_hasta.strip()
-    derogada_desde_clean    = derogada_desde.strip()
-    derogada_hasta_clean    = derogada_hasta.strip()
-    actualizada_desde_clean = actualizada_desde.strip()
-    actualizada_hasta_clean = actualizada_hasta.strip()
-
-    # La intersección de texto va ANTES del bucle y no dentro: es el paso más
-    # barato (0,08 ms) y el más selectivo — puede recortar el 95% de los
-    # candidatos —, así que sustituye a `_iter_docs` como fuente en vez de
-    # sumarse a la cadena de filtros. Medido al diseñar #31.
-    ids_texto = None
+    paises = _paises(pais)
+    match = None
     if texto:
-        paises = [pais] if pais else list(_DOCS_POR_PAIS)
+        terminos = legalize_tokenizer.tokens(texto)
         # Una consulta sin ningún término buscable no se ha buscado en ningún
         # sitio, y decir "cero coincidencias" sería mentir (FR-011).
-        if not legalize_tokenizer.tokens(texto):
+        if not terminos:
             sin_consultar.extend((codigo, CONSULTA_SIN_TERMINOS) for codigo in paises)
-            return
-        ids_texto = set()
-        for codigo in paises:
-            encontrados = _docs_con_texto(codigo, texto)
-            if encontrados is None:
-                sin_consultar.append((codigo, _motivo_sin_texto(codigo)))
-            elif encontrados:
-                ids_texto |= {(codigo, doc_id) for doc_id in encontrados}
-        if not ids_texto:
-            return
+            return []
+        match = legalize_indice.terminos_fts(terminos)
 
-    for pais_code, doc_id, doc in _iter_docs(pais):
-        if ids_texto is not None and (pais_code, doc_id) not in ids_texto:      continue
-        # Los filtros de fecha van delante: comparan cadenas tal cual y
-        # descartan sin normalizar nada. Antes el de título corría primero, así
-        # que una consulta que un filtro posterior iba a descartar igualmente
-        # pagaba el título entero — 859 ms de más sobre el corpus español.
-        #
-        # Los límites superiores comparan la fecha recortada a la precisión del
-        # límite: "2001" es todo 2001 y "2001-06", todo junio. Sin recortar,
-        # "2001-05-01" > "2001" como cadena, y `fecha_hasta="2001"` excluía
-        # justo el año que nombra (defecto #6). Todas las fechas de los corpus
-        # son YYYY-MM-DD, así que el recorte cae siempre en una frontera de
-        # año, mes o día. Los inferiores no lo necesitan: un prefijo ya ordena
-        # antes que cualquier fecha que empiece por él.
-        fp = doc.get("fecha_publicacion", "")
-        if anno_clean        and not fp.startswith(anno_clean):                                     continue
-        if fecha_desde_clean and fp and fp < fecha_desde_clean:                                     continue
-        if fecha_hasta_clean and fp and fp[:len(fecha_hasta_clean)] > fecha_hasta_clean:            continue
+    where, parametros = legalize_indice.construir_filtro(
+        consulta=consulta, rango=rango, estado=estado, anno=anno, jurisdiccion=jurisdiccion,
+        departamento=departamento, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+        derogada_desde=derogada_desde, derogada_hasta=derogada_hasta,
+        actualizada_desde=actualizada_desde, actualizada_hasta=actualizada_hasta, match=match,
+    )
+    salida = []
+    for codigo in paises:
+        if match is not None:
+            motivo = _motivo_sin_texto(codigo)
+            if motivo is None:
+                # El texto buscable puede estar dañado aunque el esquema esté
+                # bien: se descubre al consultarlo, y entonces el país deja de
+                # ofrecer búsqueda por texto, con el motivo.
+                try:
+                    _CONEXIONES[codigo].execute(
+                        "SELECT count(*) FROM cuerpo WHERE cuerpo MATCH ?", (match,)).fetchone()
+                except sqlite3.DatabaseError:
+                    _TEXTO_NO_DISPONIBLE[codigo] = motivo = ILEGIBLES
+                    print(f"[AVISO] Texto buscable de {codigo!r} ilegible al consultar; "
+                          f"la búsqueda por texto no está disponible ahí.", file=sys.stderr)
+            if motivo is not None:
+                sin_consultar.append((codigo, motivo))
+                continue
+        salida.append((codigo, where, parametros))
+    return salida
 
-        # Derogación y última actualización, a diferencia de la publicación,
-        # exigen que el campo EXISTA. `fecha_derogacion` está vacía en 10.367 de
-        # los 12.291 documentos españoles, así que tratar el vacío como "pasa el
-        # filtro" haría que "derogadas antes de 2020" devolviera también todas
-        # las que siguen vigentes — la respuesta contraria a la pregunta.
-        if derogada_desde_clean or derogada_hasta_clean:
-            fd = doc.get("fecha_derogacion", "")
-            if not fd:                                                                              continue
-            if derogada_desde_clean and fd < derogada_desde_clean:                                  continue
-            if derogada_hasta_clean and fd[:len(derogada_hasta_clean)] > derogada_hasta_clean:      continue
-        if actualizada_desde_clean or actualizada_hasta_clean:
-            fa = doc.get("ultima_actualizacion", "")
-            if not fa:                                                                              continue
-            if actualizada_desde_clean and fa < actualizada_desde_clean:                            continue
-            if actualizada_hasta_clean and fa[:len(actualizada_hasta_clean)] > actualizada_hasta_clean: continue
 
-        if estado_norm       and estado_norm       not in _campo_normalizado(doc, "estado"):        continue
-        if rango_norm        and rango_norm        not in _campo_normalizado(doc, "rango"):         continue
-        if jurisdiccion_norm and jurisdiccion_norm not in _campo_normalizado(doc, "jurisdiccion"):  continue
-        if departamento_norm and departamento_norm not in _campo_normalizado(doc, "departamento"):  continue
-        if q_norm            and q_norm            not in _campo_normalizado(doc, "titulo"):        continue
+def _filtrar_docs(*filtros, sin_consultar: list):
+    """(pais, id, doc) de cada ley que pasa los filtros, en el orden del corpus."""
+    for codigo, where, parametros in _consultas(*filtros, sin_consultar):
+        for fila in _CONEXIONES[codigo].execute(f"{_SELECT_LEY} WHERE {where} ORDER BY n", parametros):
+            yield codigo, fila[0], legalize_indice.fila_a_doc(fila)
 
-        yield pais_code, doc_id, doc
 
 def _error_sin_texto(sin_consultar: list, pais: str) -> "ErrorRespuesta | None":
     """El error de `buscar_ley` cuando la búsqueda por texto no se hizo en ningún país pedido.
@@ -1052,7 +871,7 @@ def _error_sin_texto(sin_consultar: list, pais: str) -> "ErrorRespuesta | None":
     """
     if not sin_consultar:
         return None
-    pedidos = {pais} if pais else set(_DOCS_POR_PAIS)
+    pedidos = {pais} if pais else set(_CONEXIONES)
     if {codigo for codigo, _ in sin_consultar} != pedidos:
         return None
     sugerencias = [f"{_sanitize_metadata(codigo, max_len=50)}: {motivo}"
@@ -1122,11 +941,11 @@ def buscar_ley(
     Las fechas van por rango y no por igualdad porque solo `fecha_derogacion` ya
     tiene 1.152 valores distintos: nadie busca una fecha de derogación exacta.
     """
-    if not _DOCS_POR_PAIS:
+    if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
-    if pais and pais not in _DOCS_POR_PAIS:
-        return ErrorRespuesta(error=f"País '{pais}' no reconocido.", sugerencias=list(_DOCS_POR_PAIS.keys()))
+    if pais and pais not in _CONEXIONES:
+        return ErrorRespuesta(error=f"País '{pais}' no reconocido.", sugerencias=list(_CONEXIONES.keys()))
 
     limite = min(max(1, limite), MAX_LIMIT)
 
@@ -1136,7 +955,7 @@ def buscar_ley(
     for pais_code, doc_id, doc in _filtrar_docs(
         consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
         fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta, sin_consultar,
+        actualizada_desde, actualizada_hasta, sin_consultar=sin_consultar,
     ):
         if skipped < offset:
             skipped += 1
@@ -1183,21 +1002,24 @@ def contar_leyes(
     cambiaría el tipo de retorno de lista a objeto, y toda llamada existente que
     la trate como lista dejaría de funcionar en silencio.
     """
-    if not _DOCS_POR_PAIS:
+    if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
-    if pais and pais not in _DOCS_POR_PAIS:
+    if pais and pais not in _CONEXIONES:
         return ErrorRespuesta(error=f"País '{pais}' no reconocido.",
-                              sugerencias=list(_DOCS_POR_PAIS.keys()))
+                              sugerencias=list(_CONEXIONES.keys()))
 
     # Mismo generador que `buscar_ley`, para que el conteo no pueda describir
     # una consulta distinta de la que el cliente va a ejecutar después.
     sin_consultar: list = []
-    total = sum(1 for _ in _filtrar_docs(
-        consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
-        fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta, sin_consultar,
-    ))
+    total = sum(
+        _CONEXIONES[codigo].execute(f"SELECT count(*) FROM leyes WHERE {where}", parametros).fetchone()[0]
+        for codigo, where, parametros in _consultas(
+            consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
+            fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
+            actualizada_desde, actualizada_hasta, sin_consultar,
+        )
+    )
     return Conteo(total=total, sin_consultar=[
         PaisNoConsultado(pais=_sanitize_metadata(codigo, max_len=50), motivo=motivo)
         for codigo, motivo in sin_consultar
@@ -1205,7 +1027,7 @@ def contar_leyes(
 
 @mcp.tool()
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
-    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
+    if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
 
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
     if err:
@@ -1256,7 +1078,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     inspeccionar un campo opcional para saber si había fallado algo, mientras
     que con las otras seis herramientas le bastaba el tipo.
     """
-    if not _DOCS_POR_PAIS:
+    if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
@@ -1310,8 +1132,8 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
-    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
-    if pais and pais not in _DOCS_POR_PAIS: return ErrorRespuesta(error=f"País '{pais}' desconocido")
+    if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
+    if pais and pais not in _CONEXIONES: return ErrorRespuesta(error=f"País '{pais}' desconocido")
     conteo = {}
     for _, _, doc in _iter_docs(pais):
         r = doc.get("rango") or "desconocido"
@@ -1320,7 +1142,7 @@ def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
 
 @mcp.tool()
 def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
-    if not _DOCS_POR_PAIS: return ErrorRespuesta(error="No hay índices disponibles.")
+    if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
     estados, rangos, annos, total_bytes, paises_res = {}, {}, {}, 0, set()
     for p_code, _, doc in _iter_docs(pais):
         paises_res.add(p_code)

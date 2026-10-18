@@ -55,10 +55,10 @@ def llamar(nombre, argumentos):
 def test_every_tool_signals_a_missing_index_the_same_way(nombre, argumentos):
     """The headline of B1: the type alone tells the client it failed.
 
-    `_DOCS_POR_PAIS` is empty in the suite because conftest points the server at
+    `_CONEXIONES` is empty in the suite because conftest points the server at
     a directory that does not exist, which is precisely this condition.
     """
-    assert mcp_legalize._DOCS_POR_PAIS == {}, "el escenario no es el que se cree"
+    assert mcp_legalize._CONEXIONES == {}, "el escenario no es el que se cree"
 
     assert isinstance(llamar(nombre, argumentos), ErrorRespuesta)
 
@@ -74,7 +74,7 @@ def test_every_tool_words_it_the_same_way(nombre, argumentos):
 # ─────────────────────────── The three paths of obtener_articulo ─────────────
 
 @pytest.fixture
-def corpus(monkeypatch):
+def corpus(instalar_corpus, monkeypatch):
     """Two laws under one country, sharing a prefix that is not itself a key.
 
     The ids matter. `_resolve_ley` resolves an exact match before it considers
@@ -96,7 +96,7 @@ def corpus(monkeypatch):
             "_ruta": "xx/12.md",
         },
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", docs)
+    instalar_corpus("xx", docs)
     monkeypatch.setattr(mcp_legalize, "_read_file",
                         lambda doc, pais: "Artículo 1\nEl texto del primero.")
     return docs
@@ -161,7 +161,7 @@ def test_obtener_ley_gains_the_same_structured_suggestions(corpus):
 
 # ─────────────────────────── Suggestions are untrusted text ──────────────────
 
-def test_suggestions_are_sanitized_like_any_other_metadata(monkeypatch):
+def test_suggestions_are_sanitized_like_any_other_metadata(instalar_corpus, monkeypatch):
     """Document ids come from the corpus, so they reach the model as untrusted.
 
     Moving them out of the message and into a field is not enough on its own —
@@ -171,7 +171,7 @@ def test_suggestions_are_sanitized_like_any_other_metadata(monkeypatch):
         "XX-9-<SCRIPT>": {"titulo": "A", "pais": "xx", "_ruta": "xx/a.md"},
         "XX-9-B": {"titulo": "B", "pais": "xx", "_ruta": "xx/b.md"},
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", docs)
+    instalar_corpus("xx", docs)
 
     resultado = mcp_legalize.obtener_articulo.fn(id_ley="XX-9", articulo="1", pais="xx")
 
@@ -180,9 +180,9 @@ def test_suggestions_are_sanitized_like_any_other_metadata(monkeypatch):
     assert any("[filtered]" in s for s in resultado.sugerencias)
 
 
-def test_the_echoed_id_is_sanitized_too(monkeypatch):
+def test_the_echoed_id_is_sanitized_too(instalar_corpus, monkeypatch):
     """The not-found message echoes what was asked for; it is model-supplied."""
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", {"XX-1": {"_ruta": "xx/1.md"}})
+    instalar_corpus("xx", {"XX-1": {"_ruta": "xx/1.md"}})
 
     resultado = mcp_legalize.obtener_articulo.fn(id_ley="<script>alert(1)</script>", articulo="1")
 

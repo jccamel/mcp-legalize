@@ -20,7 +20,7 @@ FECHAS = ["2000-12-31", "2001-01-01", "2001-06-15", "2001-12-31", "2002-01-01"]
 
 
 @pytest.fixture
-def corpus(monkeypatch):
+def corpus(instalar_corpus):
     docs = {
         f"F-{i}": {
             "titulo": f"Ley {i}", "_ruta": "x.md",
@@ -28,7 +28,7 @@ def corpus(monkeypatch):
         }
         for i, f in enumerate(FECHAS)
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", docs)
+    instalar_corpus("xx", docs)
     return docs
 
 

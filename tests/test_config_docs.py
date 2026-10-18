@@ -100,7 +100,7 @@ def test_no_configuration_file_is_advertised():
 
 # ─────────────────────────── The claims are true ─────────────────────────────
 
-def test_max_limit_is_a_hard_cap(monkeypatch):
+def test_max_limit_is_a_hard_cap(instalar_corpus):
     """Documented as clamping silently, so a caller cannot exceed it."""
     docs = {
         f"XX-{i}": {
@@ -111,7 +111,7 @@ def test_max_limit_is_a_hard_cap(monkeypatch):
         }
         for i in range(mcp_legalize.MAX_LIMIT + 50)
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", docs)
+    instalar_corpus("xx", docs)
 
     resultados = mcp_legalize.buscar_ley.fn(limite=mcp_legalize.MAX_LIMIT + 50)
 

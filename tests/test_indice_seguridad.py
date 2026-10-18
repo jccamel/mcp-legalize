@@ -163,3 +163,101 @@ def test_defensive_mode_is_requested_explicitly(valida, monkeypatch):
     li.abrir(valida)
 
     assert (sqlite3.SQLITE_DBCONFIG_DEFENSIVE, True) in pedidos
+
+
+# ───────────────────────────── through the server ────────────────────────────
+
+def test_the_server_serves_nothing_on_a_python_without_defensive_mode(valida, tmp_path, monkeypatch, capsys):
+    """T015: the refusal reaches the operator, and no corpus is served undefended."""
+    import mcp_legalize
+
+    indices = valida.parent
+    (tmp_path / "repos").mkdir()
+    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
+    monkeypatch.setattr(mcp_legalize, "REPOS_DIR", tmp_path / "repos")
+    for tabla in ("_CONEXIONES", "_META_POR_PAIS", "_INDEX_FILE_POR_PAIS",
+                  "_RAIZ_POR_PAIS", "_TEXTO_NO_DISPONIBLE"):
+        monkeypatch.setattr(mcp_legalize, tabla, {})
+    monkeypatch.setattr(li, "sqlite3", types.SimpleNamespace(Connection=object))
+
+    mcp_legalize._load_indices()
+
+    assert mcp_legalize._CONEXIONES == {}
+    assert any(l.startswith("[SEGURIDAD]") and "sin_modo_defensivo" in l
+               for l in capsys.readouterr().err.splitlines())
+
+
+@pytest.fixture
+def con_texto(instalar_corpus):
+    """Bodies that tell a literal reading of a query from an operator reading."""
+    documentos = {
+        "ARRENDA": {"titulo": "Ley de arrendamientos urbanos", "_ruta": "a.md"},
+        "TELE": {"titulo": "Ley del teletrabajo", "_ruta": "t.md"},
+        "AMBAS": {"titulo": "Ley mixta", "_ruta": "m.md"},
+        "PORCIENTO": {"titulo": "Ley del 50% y del guion_bajo", "_ruta": "p.md"},
+    }
+    cuerpos = {
+        "ARRENDA": "Del arrendamiento urbano.",
+        "TELE": "Del teletrabajo.",
+        "AMBAS": "Del arrendamiento y del teletrabajo.",
+        "PORCIENTO": "Otra materia.",
+    }
+    instalar_corpus("tst", documentos, cuerpos)
+
+
+def ids(resultado):
+    import mcp_legalize
+    assert isinstance(resultado, (list, mcp_legalize.ErrorRespuesta)), resultado
+    return sorted(r.id for r in resultado) if isinstance(resultado, list) else resultado.error
+
+
+# Cada consulta lleva sintaxis de FTS5. Leída como texto, sus términos son los
+# que extrae el tokenizador; leída como sintaxis, daría otra respuesta (la de
+# la derecha), o un error del motor.
+SINTAXIS_FTS = [
+    ("arrendamiento AND urbano", []),                  # como operador: ["ARRENDA"]
+    ("arrendamiento OR teletrabajo", ["AMBAS"]),       # como operador: los tres
+    ("arrendamiento NOT urbano", []),                  # como operador: ["AMBAS"]
+    ("arrend*", []),                                   # como prefijo: dos leyes
+    ("NEAR(arrendamiento urbano)", []),                # como operador: ["ARRENDA"]
+    ("texto:arrendamiento", []),                       # como columna: dos leyes
+    ('"arrendamiento" "urbano"', ["ARRENDA"]),
+    ('arrendamiento" OR "teletrabajo', ["AMBAS"]),
+    ("(arrendamiento) )", ["AMBAS", "ARRENDA"]),
+    ("arrendamiento ^urbano", ["ARRENDA"]),
+]
+
+
+@pytest.mark.parametrize("texto,esperado", SINTAXIS_FTS, ids=[t for t, _ in SINTAXIS_FTS])
+def test_fts_syntax_in_texto_is_searched_as_text(con_texto, texto, esperado):
+    """T016 / FR-006: nothing the client writes reaches the engine as syntax."""
+    import mcp_legalize
+
+    assert ids(mcp_legalize.buscar_ley.fn(pais="tst", texto=texto)) == esperado
+    assert mcp_legalize.contar_leyes.fn(pais="tst", texto=texto).total == len(esperado)
+
+
+@pytest.mark.parametrize("consulta,esperado", [
+    ("50%", ["PORCIENTO"]),
+    ("%", ["PORCIENTO"]),
+    ("_", ["PORCIENTO"]),
+    ('"', []),
+    ("' OR 1=1 --", []),
+    ("arrendamientos AND", []),
+])
+def test_a_title_query_is_a_literal_substring(con_texto, consulta, esperado):
+    """`consulta` is a substring, with no wildcard and no SQL of its own."""
+    import mcp_legalize
+
+    assert ids(mcp_legalize.buscar_ley.fn(pais="tst", consulta=consulta)) == esperado
+
+
+@pytest.mark.parametrize("termino", ["AND", "NEAR(", "x*", 'a"b', "texto:y", "(", ")", "^z", "OR NOT"])
+def test_each_term_reaches_match_as_a_string(valida, termino):
+    """Today the tokenizer only emits `[0-9a-zñ]{3,}` in lower case, which FTS5
+    never reads as an operator, so the tools above would pass without quoting.
+    Quoting is the second barrier: it must hold on its own if the term rule
+    ever widens."""
+    con = li.abrir(valida)
+
+    con.execute("SELECT count(*) FROM cuerpo WHERE cuerpo MATCH ?", (li.terminos_fts([termino]),)).fetchone()

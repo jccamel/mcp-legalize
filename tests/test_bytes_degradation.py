@@ -21,6 +21,8 @@ value reached Pydantic and the arithmetic, so what has to stay true is that a
 *tool call* survives, and that the healthy documents still come back.
 """
 
+import sqlite3
+
 import pytest
 
 import mcp_legalize
@@ -37,14 +39,24 @@ def documento(**campos):
     return base
 
 
-# Cada valor es algo que un índice manipulado puede llevar y `.get("_bytes", 0)`
-# deja pasar intacto. `True` está aquí porque en Python es un `int` y un
-# `isinstance(valor, int)` a secas lo aceptaría, contándolo como 1 byte.
-VALORES_MALFORMADOS = ["not-an-int", None, [], {}, 3.7, True]
+# Cada valor es algo que una base de datos manipulada puede llevar en la columna
+# `bytes`: SQLite guarda el tipo de cada valor y no el de la columna, así que un
+# INTEGER puede traer texto, un real o un blob. Un texto con forma de entero no
+# está: la afinidad de la columna lo guarda como entero, y es un tamaño válido.
+VALORES_MALFORMADOS = ["not-an-int", 3.7, b"\x00"]
+
+
+def manipular(pais, sql, *parametros):
+    """Escribe en la base de datos instalada como lo haría quien la controla."""
+    ruta = mcp_legalize._CONEXIONES[pais].execute("PRAGMA database_list").fetchone()[2]
+    con = sqlite3.connect(ruta)
+    con.execute(sql, parametros)
+    con.commit()
+    con.close()
 
 
 @pytest.fixture
-def indice_con_entrada_corrupta(monkeypatch):
+def indice_con_entrada_corrupta(instalar_corpus):
     """Un país con dos documentos sanos y uno corrupto en medio.
 
     Devuelve una función para elegir el valor malformado, de modo que cada test
@@ -56,9 +68,8 @@ def indice_con_entrada_corrupta(monkeypatch):
             "EVIL-1": documento(titulo="Ley hostil", _bytes=valor_malo),
             "GOOD-2": documento(titulo="Otra ley buena", _bytes=20),
         }
-        monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-        monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {})
-        monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
+        instalar_corpus("tst", docs)
+        manipular("tst", "UPDATE leyes SET bytes = ? WHERE id = 'EVIL-1'", valor_malo)
         return docs
     return montar
 
@@ -128,3 +139,15 @@ def test_a_valid_size_is_still_reported(indice_con_entrada_corrupta):
     resultados = mcp_legalize.buscar_ley.fn(pais="tst", limite=10)
 
     assert [r.bytes for r in resultados if r.id != "EVIL-1"] == [10, 20]
+
+
+def test_two_maximal_sizes_do_not_overflow_the_country_total(indice_con_entrada_corrupta):
+    """A valid integer each, but SQL's `sum` raises on overflow instead of
+    degrading: two crafted sizes took `listar_paises` down (found migrating this
+    file to the database, 2026-10-18)."""
+    indice_con_entrada_corrupta(2**63 - 1)
+    manipular("tst", "UPDATE leyes SET bytes = ? WHERE id = 'GOOD-2'", 2**63 - 1)
+
+    paises = mcp_legalize.listar_paises.fn()
+
+    assert "tst" in [p.codigo for p in paises]
