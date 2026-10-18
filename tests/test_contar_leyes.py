@@ -25,12 +25,7 @@ for a major version this project does not yet have.
 
 import pytest
 
-import legalize_postings
-import legalize_tokenizer
 import mcp_legalize
-
-GENERACION = "a" * 32
-
 
 def documento(**campos):
     base = {
@@ -44,7 +39,7 @@ def documento(**campos):
 
 
 @pytest.fixture
-def corpus(tmp_path, monkeypatch):
+def corpus(instalar_corpus):
     docs = {
         f"DOC-{i}": documento(
             titulo=f"Ley {i} de ordenación",
@@ -52,21 +47,8 @@ def corpus(tmp_path, monkeypatch):
         )
         for i in range(150)
     }
-    postings = {"arrendamiento": [f"DOC-{i}" for i in range(50)]}
-    indices = tmp_path / "indices"
-    indices.mkdir(parents=True, exist_ok=True)
-    # Escritos como los deja el indexador: formato sin código, sello real del
-    # tokenizador y la generación que los ata al índice JSON (spec 001).
-    legalize_postings.escribir(
-        legalize_postings.ruta_postings(indices, "tst"), postings,
-        tokenizador=legalize_tokenizer.huella(), generacion=GENERACION,
-    )
-
-    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {"generacion": GENERACION})
-    monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+    cuerpos = {f"DOC-{i}": "Contrato de arrendamiento." for i in range(50)}
+    instalar_corpus("tst", docs, cuerpos)
     return docs
 
 
@@ -118,7 +100,7 @@ def test_an_unknown_country_fails_like_every_other_tool(corpus):
 
 
 def test_no_indices_fails_the_same_way(monkeypatch):
-    monkeypatch.setattr(mcp_legalize, "_DOCS_POR_PAIS", {})
+    monkeypatch.setattr(mcp_legalize, "_CONEXIONES", {})
 
     resultado = mcp_legalize.contar_leyes.fn()
 

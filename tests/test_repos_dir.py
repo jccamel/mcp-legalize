@@ -18,12 +18,12 @@ These tests load real index files through `_load_indices` and assert through the
 tools, because the defect was in how the two fit together, not in either alone.
 """
 
-import json
 import os
 import sys
 
 import pytest
 
+import legalize_indice
 import mcp_legalize
 
 SECRETO = "SECRETO-FUERA-DEL-CORPUS-7731"
@@ -47,17 +47,18 @@ def entorno(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
     monkeypatch.setattr(mcp_legalize, "REPOS_DIR", repos, raising=False)
-    monkeypatch.setattr(mcp_legalize, "_DOCS_POR_PAIS", {})
-    monkeypatch.setattr(mcp_legalize, "_META_POR_PAIS", {})
-    monkeypatch.setattr(mcp_legalize, "_INDEX_FILE_POR_PAIS", {})
-    monkeypatch.setattr(mcp_legalize, "_RAIZ_POR_PAIS", {}, raising=False)
+    for tabla in ("_CONEXIONES", "_META_POR_PAIS", "_INDEX_FILE_POR_PAIS",
+                  "_RAIZ_POR_PAIS", "_TEXTO_NO_DISPONIBLE"):
+        monkeypatch.setattr(mcp_legalize, tabla, {})
 
     def indice(nombre, pais, directorio_base, documentos):
-        meta = {"pais": pais}
+        escritor = legalize_indice.Escritor(legalize_indice.ruta_indice(indices, nombre))
+        escritor.poner_meta("pais", pais)
         if directorio_base is not None:
-            meta["directorio_base"] = directorio_base
-        (indices / f"index_{nombre}.json").write_text(
-            json.dumps({"_meta": meta, "documentos": documentos}), encoding="utf-8")
+            escritor.poner_meta("directorio_base", directorio_base)
+        for doc_id, entry in documentos.items():
+            escritor.poner_ley(doc_id, entry, "")
+        escritor.confirmar()
 
     indice("legalize-ok", "ok", str(sano), {"OK-1": {"titulo": "Ley sana", "_ruta": "a.md"}})
 
@@ -146,8 +147,8 @@ def test_a_rejected_index_does_not_take_its_neighbours_down(entorno):
 
     cargar()
 
-    assert "ev" not in mcp_legalize._DOCS_POR_PAIS
-    assert "ok" in mcp_legalize._DOCS_POR_PAIS
+    assert "ev" not in mcp_legalize._CONEXIONES
+    assert "ok" in mcp_legalize._CONEXIONES
 
 
 # ──────────────────────────── legitimate layouts ─────────────────────────────
@@ -173,7 +174,7 @@ def test_a_missing_repos_dir_serves_no_index_rather_than_a_default(entorno, monk
 
     cargar()
 
-    assert mcp_legalize._DOCS_POR_PAIS == {}
+    assert mcp_legalize._CONEXIONES == {}
     assert "LEGALIZE_REPOS_DIR" in capsys.readouterr().err
 
 

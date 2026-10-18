@@ -362,19 +362,12 @@ def test_every_stale_state_is_cleared_by_the_remedy_check_updates_proposes(
     assert codigo == 0
 
 
-def test_the_server_does_not_answer_from_postings_of_another_tokenizer(tmp_path, monkeypatch):
-    """US5 scenario 3: postings built under other rules are not used, and it is said."""
-    import legalize_postings as lp
+def test_the_server_does_not_answer_from_postings_of_another_tokenizer(instalar_corpus):
+    """US5 scenario 3: text indexed under other rules is not used, and it is said."""
     import mcp_legalize
 
-    indices = tmp_path / "indices"
-    lp.escribir(lp.ruta_postings(indices, "tst"), {"arrendamiento": {"X-1"}},
-                tokenizador="0000deadbeef", generacion="c" * 32)
-    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
-    monkeypatch.setattr(mcp_legalize, "_DOCS_POR_PAIS", {"tst": {"X-1": {"titulo": "t"}}})
-    monkeypatch.setattr(mcp_legalize, "_META_POR_PAIS", {"tst": {"generacion": "c" * 32}})
-    monkeypatch.setattr(mcp_legalize, "_INDEX_FILE_POR_PAIS", {"tst": "index_tst"})
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
+    instalar_corpus("tst", {"X-1": {"titulo": "t"}}, {"X-1": "Arrendamiento."},
+                    meta={"tokenizador": "0000deadbeef"})
 
     conteo = mcp_legalize.contar_leyes.fn(texto="arrendamiento")
 

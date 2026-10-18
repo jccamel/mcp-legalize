@@ -14,21 +14,19 @@ partial one (#37), so it is the tool that carries the signal (decision Q3):
   could be searched — 16 call sites depend on that shape — and returns
   `ErrorRespuesta` only when none could.
 
-The reasons are the ones `legalize_postings.estado` decides, plus one of the
+The reasons are the ones the server decides per corpus, plus one of the
 query's own: `consulta_sin_terminos`, when no term reaches three characters.
 """
 
 import pytest
 
-import legalize_postings
-import legalize_tokenizer
+import sqlite3
+
+import legalize_indice
 import mcp_legalize
 
-GENERACION = "b" * 32
-
 MOTIVOS_DEL_CONTRATO = {
-    "sin_postings", "ilegibles", "formato_anterior",
-    "tokenizador_distinto", "generacion_distinta", "consulta_sin_terminos",
+    "sin_postings", "ilegibles", "tokenizador_distinto", "consulta_sin_terminos",
 }
 
 
@@ -38,26 +36,13 @@ def documento(pais, n):
 
 
 @pytest.fixture
-def dos_paises(tmp_path, monkeypatch):
-    """`ok` has usable postings; `sin` has none at all."""
-    indices = tmp_path / "indices"
-    indices.mkdir()
-    legalize_postings.escribir(
-        legalize_postings.ruta_postings(indices, "ok"),
-        {"arrendamiento": {"OK-1", "OK-2"}, "urbano": {"OK-1"}},
-        tokenizador=legalize_tokenizer.huella(), generacion=GENERACION,
-    )
-    monkeypatch.setattr(mcp_legalize, "INDICES_DIR", indices)
-    monkeypatch.setattr(mcp_legalize, "_DOCS_POR_PAIS", {
-        "ok": {"OK-1": documento("ok", 1), "OK-2": documento("ok", 2)},
-        "sin": {"SIN-1": documento("sin", 1)},
-    })
-    monkeypatch.setattr(mcp_legalize, "_META_POR_PAIS",
-                        {"ok": {"generacion": GENERACION}, "sin": {}})
-    monkeypatch.setattr(mcp_legalize, "_INDEX_FILE_POR_PAIS",
-                        {"ok": "index_ok", "sin": "index_sin"})
-    monkeypatch.setattr(mcp_legalize, "_INVERTIDO_POR_PAIS", {})
-    return indices
+def dos_paises(instalar_corpus):
+    """`ok` has searchable text; `sin` was indexed with another tokenizer."""
+    instalar_corpus("ok", {"OK-1": documento("ok", 1), "OK-2": documento("ok", 2)},
+                    {"OK-1": "Arrendamiento urbano.", "OK-2": "Arrendamiento."})
+    instalar_corpus("sin", {"SIN-1": documento("sin", 1)}, {"SIN-1": "Arrendamiento."},
+                    meta={"tokenizador": "otra-huella"})
+    return legalize_indice.ruta_indice(mcp_legalize.REPOS_DIR.parent / "indices_instalados", "legalize-ok")
 
 
 def no_consultados(conteo):
@@ -70,14 +55,14 @@ def test_the_count_names_the_country_it_could_not_search(dos_paises):
     conteo = mcp_legalize.contar_leyes.fn(texto="arrendamiento")
 
     assert conteo.total == 2
-    assert no_consultados(conteo) == {("sin", "sin_postings")}
+    assert no_consultados(conteo) == {("sin", "tokenizador_distinto")}
 
 
 def test_a_country_limited_count_says_it_could_not_search_there(dos_paises):
     conteo = mcp_legalize.contar_leyes.fn(pais="sin", texto="arrendamiento")
 
     assert conteo.total == 0
-    assert no_consultados(conteo) == {("sin", "sin_postings")}
+    assert no_consultados(conteo) == {("sin", "tokenizador_distinto")}
 
 
 def test_nothing_is_listed_when_every_requested_country_was_searched(dos_paises):
@@ -102,11 +87,16 @@ def test_a_query_without_searchable_terms_is_not_a_query_without_matches(dos_pai
                                       ("sin", "consulta_sin_terminos")}
 
 
-def test_postings_that_turn_out_corrupt_when_decoded_are_reported_unreadable(dos_paises):
-    """A bad list is only found at query time; the count must still say so."""
-    ruta = legalize_postings.ruta_postings(dos_paises, "ok")
-    texto = ruta.read_text(encoding="utf-8").replace("arrendamiento\t0,1", "arrendamiento\t0,9")
-    ruta.write_text(texto, encoding="utf-8")
+def test_searchable_text_that_turns_out_corrupt_is_reported_unreadable(dos_paises):
+    """Damaged full-text data passes the schema check and is only found at query
+    time; the count must still say so."""
+    con = sqlite3.connect(dos_paises)
+    # Quien manipula el índice usa un SQLite sin modo defensivo.
+    con.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, False)
+    # Las hojas del índice de texto: ids 1 y 10 son la estructura y los promedios.
+    con.execute("DELETE FROM cuerpo_data WHERE id > 10")
+    con.commit()
+    con.close()
 
     conteo = mcp_legalize.contar_leyes.fn(pais="ok", texto="arrendamiento")
 
@@ -126,7 +116,7 @@ def test_searching_only_an_unsearchable_country_is_an_error_not_an_empty_list(do
     resultado = mcp_legalize.buscar_ley.fn(pais="sin", texto="arrendamiento")
 
     assert isinstance(resultado, mcp_legalize.ErrorRespuesta)
-    assert "sin: sin_postings" in resultado.sugerencias
+    assert "sin: tokenizador_distinto" in resultado.sugerencias
 
 
 def test_searching_every_country_still_returns_the_list_of_those_that_could(dos_paises):

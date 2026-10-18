@@ -47,7 +47,7 @@ def documento(**campos):
 
 
 @pytest.fixture
-def corpus(monkeypatch):
+def corpus(instalar_corpus):
     docs = {
         "HACIENDA": documento(
             titulo="Ley tributaria",
@@ -68,9 +68,7 @@ def corpus(monkeypatch):
         ),
         "SIN_DEPARTAMENTO": documento(titulo="Ley huérfana"),
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "tst", docs)
-    monkeypatch.setitem(mcp_legalize._META_POR_PAIS, "tst", {})
-    monkeypatch.setitem(mcp_legalize._INDEX_FILE_POR_PAIS, "tst", "index_tst")
+    instalar_corpus("tst", docs)
     return docs
 
 

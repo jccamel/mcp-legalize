@@ -64,9 +64,9 @@ def test_ordinals_and_ligatures_are_left_as_they_are():
     assert ln.normalizar("ﬁn") == "ﬁn"
 
 
-def test_title_search_folds_the_same_way(monkeypatch):
+def test_title_search_folds_the_same_way(instalar_corpus, monkeypatch):
     """`consulta` and `texto` share the folding (principle III)."""
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "fr", {
+    instalar_corpus("fr", {
         "FR-1": {"titulo": "Code forestier — Forêt et SÛRETÉ", "_ruta": "x.md"},
         "ES-1": {"titulo": "Ley de Enseñanza del Año", "_ruta": "y.md"},
     })

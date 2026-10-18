@@ -24,8 +24,8 @@ from mcp_legalize import ArticuloResultado
 
 
 @pytest.fixture
-def ley(monkeypatch):
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "fr", {
+def ley(instalar_corpus, monkeypatch):
+    instalar_corpus("fr", {
         "LEGITEXT000005634379": {"titulo": "Code de commerce", "_ruta": "fr/x.md"},
     })
     cuerpo = {}

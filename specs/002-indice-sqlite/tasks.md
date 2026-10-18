@@ -137,7 +137,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
   Cambio único: `json.loads(indice.read_text())` pasa a `legalize_indice.como_dict(indice)`,
   y la ruta del índice pasa a `.db`. Los asserts no cambian.
-- [ ] T012 Añadir a `tests/conftest.py` el fixture `instalar_corpus(pais, documentos,
+- [X] T012 Añadir a `tests/conftest.py` el fixture `instalar_corpus(pais, documentos,
   cuerpos=None)`. Escribe una base de datos real en `tmp_path` con `legalize_indice.Escritor`,
   crea los ficheros del cuerpo bajo un `LEGALIZE_REPOS_DIR` temporal y la registra en el
   servidor por la vía de carga normal.
@@ -166,10 +166,10 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   - `meta.formato` distinto;
   - un intento de `fts3_tokenizer` registrado en el esquema;
   - escritura con la conexión abierta: debe fallar por `query_only`.
-- [ ] T015 [P] [US2] En `tests/test_indice_seguridad.py`, un test con `abrir` parcheado para
+- [X] T015 [P] [US2] En `tests/test_indice_seguridad.py`, un test con `abrir` parcheado para
   simular un Python sin `setconfig`: el servidor no sirve ningún índice y avisa con
   `[SEGURIDAD]`.
-- [ ] T016 [P] [US2] En `tests/test_indice_seguridad.py`, un test con texto del cliente que
+- [X] T016 [P] [US2] En `tests/test_indice_seguridad.py`, un test con texto del cliente que
   contiene sintaxis de FTS5 (`"`, `AND`, `NEAR(`, `*`, `(`, `)`, `col:valor`) en `texto`,
   `consulta` y `frase`: ninguna llamada lanza un error del motor, y el resultado equivale a
   buscar ese texto literal.
@@ -186,7 +186,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 ### Adaptación de tests existentes (autorizada en plan.md)
 
-- [ ] T018 [US1] Migrar los fixtures del grupo «Fixture» de [plan.md](plan.md):
+- [X] T018 [US1] Migrar los fixtures del grupo «Fixture» de [plan.md](plan.md):
   `test_error_contract`, `test_contar_leyes`, `test_full_text_search`, `test_search_filters`,
   `test_fechas_hasta`, `test_resolve_ley_mayusculas`, `test_plegado`, la parte del servidor
   de `test_estado_del_texto`, `test_articulo_por_encabezado`, `test_articulo_sin_prefijos`,
@@ -196,12 +196,12 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   La inyección en `_DOCS_POR_PAIS`, `_META_POR_PAIS`, `_INDEX_FILE_POR_PAIS` y `_read_file`
   pasa a `instalar_corpus(...)`. Los asserts no cambian. Ejecutar y comprobar que fallan
   porque el servidor aún lee de memoria.
-- [ ] T019 [US1] En `tests/test_text_search_availability.py`, `MOTIVOS_DEL_CONTRATO` pierde
+- [X] T019 [US1] En `tests/test_text_search_availability.py`, `MOTIVOS_DEL_CONTRATO` pierde
   `formato_anterior` y `generacion_distinta`. Es la diferencia deliberada del contrato.
 
 ### Implementación
 
-- [ ] T020 [US1] En `legalize_indice.py`, implementar `construir_filtro(...)`: una sola
+- [X] T020 [US1] En `legalize_indice.py`, implementar `construir_filtro(...)`: una sola
   función que devuelve `(sql_where, parametros)` para `buscar_ley` y `contar_leyes` (R6).
   - `instr(columna_norm, ?) > 0` para consulta, rango, estado, jurisdicción y departamento;
   - `anno` como prefijo de `fecha_publicacion`;
@@ -212,7 +212,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   Para `texto`, los términos de `legalize_tokenizer.tokens` van entrecomillados para FTS5 y
   unidos con `AND`, en un `n IN (SELECT rowid FROM cuerpo WHERE cuerpo MATCH ?)`. Si no hay
   términos, el motivo es `consulta_sin_terminos`. Orden `ORDER BY n`.
-- [ ] T021 [US1] En `mcp_legalize.py`, reescribir la carga y la consulta:
+- [X] T021 [US1] En `mcp_legalize.py`, reescribir la carga y la consulta:
   - `_load_indices` abre cada `index_*.db` con `legalize_indice.abrir`, comprueba
     `directorio_base` contra `LEGALIZE_REPOS_DIR` como hoy, avisa del formato anterior
     (contrato del operador) y registra las conexiones por país, en el orden de hoy;
@@ -224,13 +224,13 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
     `_estado_del_texto` de #52.
   - Se retiran `_DOCS_POR_PAIS`, `_INVERTIDO_POR_PAIS`, `_campo_normalizado` y el uso de
     `legalize_postings`.
-- [ ] T022 [US1] Sustituir los tests del grupo «Objeto retirado» de [plan.md](plan.md) por sus
+- [X] T022 [US1] Sustituir los tests del grupo «Objeto retirado» de [plan.md](plan.md) por sus
   equivalentes sobre la base de datos, conservando los invariantes:
   - `test_index_shape` → filas malformadas degradan esa fila, no la herramienta (ADR 0002);
   - `test_search_normalization_cache` → el título se pliega al indexar, no en cada consulta;
   - `test_postings_format` y la parte de postings de `test_inverted_index` → cubiertos por
     `test_indice_formato` y `test_indice_seguridad`. Se borran.
-- [ ] T023 [US1] Ejecutar la suite completa (en verde). Reindexar los cuatro corpus locales,
+- [X] T023 [US1] Ejecutar la suite completa (en verde). Reindexar los cuatro corpus locales,
   ejecutar `paridad/banco.py` con la rama y compararlo con `referencia-main.json`. Las únicas
   diferencias admitidas son las de [contracts/herramientas-mcp.md](contracts/herramientas-mcp.md).
   Cualquier otra se corrige antes de seguir. Commit
@@ -402,4 +402,12 @@ Cada una pasa la CI por sí sola.
   - Python 3.12 en la CI se adelanta a la fase 2: las PR apiladas pasan la CI por sí solas, y en 3.10/3.11 no hay `setconfig`. La protección de `main` sigue exigiendo los checks de 3.10 y 3.11 y hay que cambiarla con permiso del usuario.
   - T010 escribe los dos formatos (JSON+postings y `.db`) hasta US4; `test_indice_desde_indexador.py` exige que contengan lo mismo y en el mismo orden.
   - T011 (migrar los tests que leen el JSON) pasa a US4, al retirar el JSON; T012 (`instalar_corpus`) y T016 (sintaxis de FTS5 a través de las herramientas) pasan a US1, donde el servidor ya lee la base de datos.
+- Decisiones al implementar US1 (2026-10-18, aprobadas por el usuario):
+  - `leyes.id` es `UNIQUE` binario, no `COLLATE NOCASE`. La regla de duplicados del indexador distingue mayúsculas; con `NOCASE`, un fichero con `BOJA-B` junto a `BOJA-b` abortaba la escritura del corpus entero. En los corpus reales hay 0 choques (es, eu, fr, se). La búsqueda sin mayúsculas sigue por `id_casefold`, y el comportamiento del #4 no cambia.
+  - `sin_postings` sigue en el contrato, pero ningún país servido lo alcanza: todo corpus servido trae su FTS. Los tests que lo usaban con un país servido pasan a `tokenizador_distinto` (`test_text_search_availability`), o se retiran por estar cubiertos (`test_full_text_search`, el del país sin índice invertido).
+  - Se retiran sin sustituto los dos tests de carga perezosa de `test_full_text_search`: no hay nada que cargar.
+  - Se retira `test_an_index_built_before_the_field_existed_answers_unknown`: el escritor guarda `estado_texto` resuelto, así que ese índice no puede existir.
+  - `test_bytes_degradation` manipula la columna `bytes` del `.db` con valores que SQLite puede guardar (texto, real, blob). Al migrarlo apareció un defecto: dos tamaños de 2^63−1 desbordaban `sum(bytes)` en `listar_paises`. Ahora se usa `total()` solo sobre enteros.
+  - T022: `test_index_shape` → `test_indice_degradacion.py`; `test_search_normalization_cache` → `test_titulo_plegado_al_indexar.py`. Las comillas de `terminos_fts` tienen su propio test: el tokenizador ya impide hoy que llegue sintaxis, así que los tests a través de las herramientas no las cubrían.
+- Paridad de US1 (T023, 2026-10-18): 1.178 peticiones, 0 diferencias con `referencia-main.json`. Los cuatro corpus se reindexaron con `--force-all`: sin cambios, la pasada incremental no escribe el `.db`, y eso lo resuelve T024. El `.db` de `mock` se generó aparte para el banco; el del repositorio llega en T035. Sin él, las 7 diferencias eran todas de `mock`. Tamaños: es 530 MB, eu 248 MB, fr 77 MB, se 42 MB.
 - Mediciones (T028, T031, T034, T040): _pendiente_

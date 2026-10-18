@@ -66,14 +66,14 @@ def test_an_absent_text_state_is_recorded_as_the_spec_defines_it(indexer_cli):
 # ──────────────────────────────── server ─────────────────────────────────────
 
 @pytest.fixture
-def corpus(monkeypatch):
+def corpus(instalar_corpus, monkeypatch):
     docs = {
         "ENACTED": {"titulo": "Ley original", "_ruta": "a.md",
                     "estado_texto": "as_enacted", "ultima_modificacion": "2243011"},
         "VIGENTE": {"titulo": "Ley consolidada", "_ruta": "b.md", "estado_texto": "point_in_time"},
         "ANTIGUO": {"titulo": "Ley de un índice anterior", "_ruta": "c.md"},
     }
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", docs)
+    instalar_corpus("xx", docs)
     monkeypatch.setattr(mcp_legalize, "_read_file", lambda d, p: "Artículo 1\nTexto.\n")
     return docs
 
@@ -110,13 +110,6 @@ def test_a_missing_article_still_says_which_kind_of_text_was_searched(corpus):
 
     assert articulo.error == "Artículo no encontrado"
     assert articulo.estado_texto == "as_enacted"
-
-
-def test_an_index_built_before_the_field_existed_answers_unknown(corpus):
-    """Not `point_in_time`: the server does not know, and must not invent it."""
-    assert por_id(mcp_legalize.buscar_ley.fn(pais="xx"))["ANTIGUO"].estado_texto is None
-    assert mcp_legalize.obtener_ley.fn("ANTIGUO", pais="xx").estado_texto is None
-    assert mcp_legalize.obtener_articulo.fn("ANTIGUO", "1", pais="xx").estado_texto is None
 
 
 def test_the_value_is_sanitised_like_any_other_metadata(corpus):

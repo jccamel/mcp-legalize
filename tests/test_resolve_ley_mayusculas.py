@@ -29,9 +29,9 @@ def doc(titulo="Ley de prueba"):
 
 
 @pytest.fixture
-def corpus(monkeypatch):
+def corpus(instalar_corpus):
     def con(*ids):
-        monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "xx", {i: doc(i) for i in ids})
+        instalar_corpus("xx", {i: doc(i) for i in ids})
     return con
 
 

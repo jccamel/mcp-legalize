@@ -28,8 +28,8 @@ ANEXO = "Bilaga utan rubriker. " * 40   # 880 caracteres sin ningún encabezado
 
 
 @pytest.fixture
-def ley(monkeypatch):
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}})
+def ley(instalar_corpus, monkeypatch):
+    instalar_corpus("se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}})
     cuerpo = {}
     monkeypatch.setattr(mcp_legalize, "_read_file", lambda d, p: cuerpo["texto"])
 
@@ -102,8 +102,8 @@ def test_the_heading_less_fallback_reports_truncation_too(ley):
     assert resultado.chars_devueltos < resultado.chars_totales
 
 
-def test_a_missing_article_carries_no_truncation_fields(ley, monkeypatch):
-    monkeypatch.setitem(mcp_legalize._DOCS_POR_PAIS, "se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}})
+def test_a_missing_article_carries_no_truncation_fields(instalar_corpus, ley, monkeypatch):
+    instalar_corpus("se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}})
     monkeypatch.setattr(mcp_legalize, "_read_file", lambda d, p: "##### 1 §\n\nFörsta.\n")
 
     resultado = mcp_legalize.obtener_articulo.fn("SFS-1", "99", pais="se")

@@ -45,7 +45,8 @@ FORMATO = "1"
 ESQUEMA = (
     "CREATE TABLE meta(clave TEXT PRIMARY KEY, valor TEXT NOT NULL)",
     "CREATE TABLE leyes("
-    "n INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE COLLATE NOCASE, pais TEXT NOT NULL, "
+    "n INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, id_casefold TEXT NOT NULL, "
+    "pais TEXT NOT NULL, "
     "titulo TEXT NOT NULL, rango TEXT NOT NULL, estado TEXT NOT NULL, "
     "fecha_publicacion TEXT NOT NULL, ultima_actualizacion TEXT NOT NULL, "
     "fecha_derogacion TEXT NOT NULL, fuente TEXT NOT NULL, jurisdiccion TEXT NOT NULL, "
@@ -55,6 +56,7 @@ ESQUEMA = (
     "estado_norm TEXT NOT NULL, jurisdiccion_norm TEXT NOT NULL, departamento_norm TEXT NOT NULL)",
     "CREATE INDEX leyes_fecha_publicacion ON leyes(fecha_publicacion)",
     "CREATE INDEX leyes_ruta ON leyes(ruta)",
+    "CREATE INDEX leyes_id_casefold ON leyes(id_casefold)",
     "CREATE TABLE articulos("
     "ley INTEGER NOT NULL, orden INTEGER NOT NULL, numero TEXT NOT NULL COLLATE NOCASE, "
     "ubicacion TEXT NOT NULL, inicio INTEGER NOT NULL, fin_encabezado INTEGER NOT NULL, "
@@ -158,8 +160,10 @@ class Escritor:
         """Escribe una ley; `cuerpo` es el texto sin frontmatter que se sirve.
 
         Si el id ya existe con las mismas letras, la reemplaza conservando su
-        posición, como hacía el JSON al reasignar una clave. Un id distinto
-        que solo difiere en mayúsculas choca con la restricción de unicidad.
+        posición, como hacía el JSON al reasignar una clave. Un id que solo
+        difiere en mayúsculas es otra ley: la regla de duplicados del indexador
+        distingue mayúsculas, y una unicidad que no lo hiciera dejaría que un
+        solo fichero manipulado abortara la escritura del corpus entero.
         """
         valores = {col: _texto(campos.get(clave)) for col, clave in _CAMPOS_TEXTO}
         if not valores["estado_texto"]:
@@ -172,8 +176,8 @@ class Escritor:
         else:
             n = (self._con.execute("SELECT coalesce(max(n), 0) + 1 FROM leyes").fetchone()[0])
         self._con.execute(
-            f"INSERT INTO leyes VALUES ({', '.join('?' * 24)})",
-            (n, id_ley, *(valores[c] for c, _ in _CAMPOS_TEXTO[:13]), valores["ruta"],
+            f"INSERT INTO leyes VALUES ({', '.join('?' * 25)})",
+            (n, id_ley, id_ley.casefold(), *(valores[c] for c, _ in _CAMPOS_TEXTO[:13]), valores["ruta"],
              _entero(campos.get("_bytes")), _real(campos.get("_mtime")), len(cuerpo), *normalizados),
         )
         self._con.executemany(
@@ -313,3 +317,92 @@ def como_dict(ruta: Path) -> dict:
         return {"_meta": meta, "documentos": documentos}
     finally:
         con.close()
+
+
+# ─────────────────────────────── consultar ───────────────────────────────────
+
+# Columnas con las que el servidor reconstruye cada ley con las claves que tenía
+# el JSON, para que sus ayudantes (`_doc_resumen`, `_resolve_ruta`,
+# `_wrap_untrusted`…) no cambien.
+COLUMNAS_LEY = ("id", *(c for c, _ in _CAMPOS_TEXTO), "bytes", "mtime")
+
+
+def fila_a_doc(fila) -> dict:
+    """Una fila de `leyes` (en el orden de `COLUMNAS_LEY`) como la entrada del JSON."""
+    id_ley, *textos, bytes_, mtime = fila
+    doc = {"identificador": id_ley}
+    for (col, clave), valor in zip(_CAMPOS_TEXTO, textos):
+        if col in _OPCIONALES and not valor:
+            continue
+        doc[clave] = valor
+    doc["_archivo"] = Path(doc["_ruta"]).name if doc.get("_ruta") else ""
+    doc["_bytes"], doc["_mtime"] = bytes_, mtime
+    return doc
+
+
+def terminos_fts(terminos) -> str:
+    """Una expresión MATCH que exige todos los términos, cada uno como texto literal.
+
+    Cada término va entre comillas dobles, con las internas duplicadas: así FTS5
+    lo trata como una cadena y nunca como sintaxis. Un `AND`, `NEAR`, `*` o
+    paréntesis del cliente no puede funcionar como operador (FR-006).
+    """
+    return " AND ".join('"' + t.replace('"', '""') + '"' for t in sorted(terminos))
+
+
+def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion="", departamento="",
+                     fecha_desde="", fecha_hasta="", derogada_desde="", derogada_hasta="",
+                     actualizada_desde="", actualizada_hasta="", match=None) -> tuple[str, list]:
+    """`(where, parametros)` para `buscar_ley` y `contar_leyes`: un solo sitio (principio III).
+
+    Reproduce la semántica de los filtros que había en memoria:
+
+    - Subcadena sobre la forma plegada en título, rango, estado, jurisdicción y
+      departamento. `instr` y no `LIKE`, que añadiría comodines que escapar.
+    - `anno` es un prefijo de la fecha de publicación.
+    - Las fechas de publicación dejan pasar los documentos sin fecha; las de
+      derogación y de actualización exigen que exista.
+    - Los límites superiores comparan la fecha recortada a la precisión del
+      límite: "2001" es todo 2001 (defecto #6).
+    - `match`, si llega, es una expresión de `terminos_fts` sobre el cuerpo.
+
+    Todos los valores van como parámetros enlazados, nunca dentro del SQL.
+    """
+    condiciones, parametros = [], []
+
+    def subcadena(columna, valor):
+        if valor:
+            condiciones.append(f"instr({columna}, ?) > 0")
+            parametros.append(legalize_normalizacion.normalizar(valor))
+
+    def rango_fechas(columna, desde, hasta, exige):
+        desde, hasta = desde.strip(), hasta.strip()
+        if not (desde or hasta):
+            return
+        if exige:
+            condiciones.append(f"{columna} != ''")
+            vacia = ""
+        else:
+            vacia = f"{columna} = '' OR "
+        if desde:
+            condiciones.append(f"({vacia}{columna} >= ?)")
+            parametros.append(desde)
+        if hasta:
+            condiciones.append(f"({vacia}substr({columna}, 1, length(?)) <= ?)")
+            parametros.extend([hasta, hasta])
+
+    if anno.strip():
+        condiciones.append("substr(fecha_publicacion, 1, length(?)) = ?")
+        parametros.extend([anno.strip(), anno.strip()])
+    rango_fechas("fecha_publicacion", fecha_desde, fecha_hasta, exige=False)
+    rango_fechas("fecha_derogacion", derogada_desde, derogada_hasta, exige=True)
+    rango_fechas("ultima_actualizacion", actualizada_desde, actualizada_hasta, exige=True)
+    subcadena("estado_norm", estado)
+    subcadena("rango_norm", rango)
+    subcadena("jurisdiccion_norm", jurisdiccion)
+    subcadena("departamento_norm", departamento)
+    subcadena("titulo_norm", consulta)
+    if match is not None:
+        condiciones.append("n IN (SELECT rowid FROM cuerpo WHERE cuerpo MATCH ?)")
+        parametros.append(match)
+    return (" AND ".join(condiciones) or "1"), parametros
