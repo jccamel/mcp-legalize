@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +49,7 @@ jobs:
         # aparecería hasta que alguien lo regenerara.
         #
         # El lock se generó con 3.12 y no lleva markers de versión, así que
-        # imponerlo en 3.10/3.11/3.13 podría fallar al resolver por una rueda que
+        # imponerlo en 3.13 podría fallar al resolver por una rueda que
         # no exista para esa versión — un fallo del fichero, no del proyecto.
         run: |
           python -m pip install --upgrade pip

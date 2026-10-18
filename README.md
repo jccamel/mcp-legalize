@@ -1,7 +1,7 @@
 # Legalize MCP Server
 
 [![CI](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jccamel/mcp-legalize/actions/workflows/ci.yml)
-[![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](#installation)
+[![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](#installation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A Model Context Protocol server that gives an AI assistant read-only access to
@@ -85,8 +85,10 @@ sequenceDiagram
 
 ## Installation
 
-Python 3.10 or later. The floor is set by `fastmcp` and `mcp`, which both
-declare `Requires-Python >=3.10`, and by the use of `Path.is_relative_to()`.
+Python 3.12 or later. The floor is set by the index: each corpus is a SQLite
+database opened as untrusted input, in SQLite's defensive mode, and Python only
+exposes that switch (`Connection.setconfig`) from 3.12. On an older Python the
+server refuses to serve any index rather than open one without it.
 
 ```bash
 git clone https://github.com/your-username/mcp-legalize.git
@@ -341,8 +343,8 @@ symlinks — on Windows, anywhere without Developer Mode. That test is the only
 cover for `Path.resolve()` following a link out of the corpus, which is why CI
 runs on Linux and asserts that it ran.
 
-Continuous integration runs the suite on every push across Python 3.10, 3.11,
-3.12 and 3.13. It asserts that the tests **ran**, not merely that nothing failed:
+Continuous integration runs the suite on every push across Python 3.12 and
+3.13. It asserts that the tests **ran**, not merely that nothing failed:
 
 | Step | Guards against |
 |---|---|
