@@ -2,7 +2,7 @@
 """
 scripts/update_index.py
 =======================
-Mantenimiento de los índices `indices/index_<repo>.json`.
+Mantenimiento de los índices `indices/index_<repo>.db` (spec 002).
 
 Sincroniza el índice de un país con el estado real de los ficheros .md
 en su respectivo repositorio (ej. repos/legalize-es).
@@ -11,14 +11,11 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 """
 
 import argparse
-import json
-import os
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import NamedTuple
 
 _SCRIPT_DIR = Path(__file__).parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
@@ -34,7 +31,6 @@ if str(_PROJECT_DIR) not in sys.path:
 import legalize_frontmatter  # noqa: E402  (requiere el sys.path de arriba)
 import legalize_indice  # noqa: E402  (idem)
 import legalize_injection  # noqa: E402  (idem)
-import legalize_postings  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
 import legalize_tokenizer  # noqa: E402  (idem)
 
@@ -209,15 +205,15 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
     """Construye una entrada de índice para un documento .md.
 
     Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos,
-    campos_truncados, terminos)
+    campos_truncados, cuerpo)
     """
     text = md_path.read_text(encoding="utf-8", errors="replace")
     hallazgos = _check_injection(text)
     meta = _parse_frontmatter(text)
-    # Se aprovecha la lectura que ya se hacía para escanear. Tokenizar aquí
-    # cuesta una pasada más sobre un texto que ya está en memoria; hacerlo en
-    # otro sitio costaría volver a leer 921 MB del disco.
-    terminos = legalize_tokenizer.tokens_de_documento(text)
+    # Se aprovecha la lectura que ya se hacía para escanear: el cuerpo va al
+    # texto buscable del índice. Volver a leerlo en otro sitio costaría otra
+    # pasada sobre 921 MB de disco.
+    cuerpo = legalize_frontmatter.cuerpo(text)
 
     try:
         ruta_relativa = md_path.relative_to(base_dir).as_posix()
@@ -276,173 +272,41 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
     # Truncar antes de escanear: el escaneo cuesta en proporción al texto y no
     # tiene sentido pagarlo sobre una franja que no va a entrar en el índice.
     truncados = _truncar_metadatos(entry)
-    return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados, terminos
+    return doc_id, entry, hallazgos, _scan_metadatos(entry), truncados, cuerpo
 
-def _nombre_repo(index_path: Path) -> str:
-    """El nombre con el que `legalize_postings` localiza los postings de un índice.
+def _ficheros_anteriores(index_path: Path) -> list[Path]:
+    """Lo que dejaba un índice anterior a la spec 002 junto al que se escribe ahora.
 
-    Fichero aparte y no una sección del JSON: `json.load` no sabe leer una
-    sección suelta, así que fundirlos obligaría al servidor a procesar todos
-    los postings para llegar a los metadatos que necesita al arrancar, y haría
-    imposible la carga perezosa (ADR 0003).
+    El JSON, sus postings y el pickle que precedió a estos. Se borran en cuanto
+    la base de datos está en disco: dejarlos al lado serían ficheros que alguien
+    podría intentar que se leyeran, y un operador no sabría cuál está en uso.
     """
-    return index_path.stem.removeprefix("index_")
+    nombre = index_path.stem.removeprefix("index_")
+    return [index_path.with_suffix(".json"),
+            index_path.parent / f"inverted_{nombre}.postings",
+            index_path.parent / f"inverted_{nombre}.bin"]
 
-def _invertir(terminos_por_doc: dict[str, set[str]]) -> dict[str, list[str]]:
-    """De documento->términos a término->documentos.
 
-    Las listas van ordenadas para que dos índices construidos sobre el mismo
-    corpus salgan byte a byte iguales: un `.bin` que cambia sin que cambie nada
-    real haría ruido en cualquier comprobación de frescura.
+def _cargar_indice(index_path: Path) -> tuple[dict, str | None]:
+    """El índice vigente como `{"_meta", "documentos"}` y, si no sirve de base, por qué.
+
+    Se abre como lo abre el servidor: el índice es entrada no confiable también
+    para el indexador (principio II), y sobre uno que el servidor rechazaría no
+    se construye nada. Uno ausente, ilegible, de otro formato o con un esquema
+    inesperado se reconstruye entero; uno en el formato anterior se migra igual,
+    sin que haga falta ningún flag.
     """
-    postings: dict[str, list[str]] = {}
-    for doc_id, terminos in terminos_por_doc.items():
-        for termino in terminos:
-            postings.setdefault(termino, []).append(doc_id)
-    return {t: sorted(docs) for t, docs in sorted(postings.items())}
-
-def _terminos_en_disco(documentos: dict, ids: Iterable[str], repo_dir: Path) -> dict[str, set[str]]:
-    """Tokeniza desde disco los documentos indicados del índice.
-
-    La ruta sale del índice, que es entrada no confiable también para el
-    indexador (principio II): un `_ruta` que escape del repositorio haría que
-    los términos de un fichero ajeno acabaran siendo buscables. Se exige que la
-    ruta resuelta esté dentro de `repo_dir` y sea un fichero regular; si no, el
-    documento se queda sin términos, igual que uno cuyo fichero ya no existe.
-    """
-    raiz = repo_dir.resolve()
-    terminos: dict[str, set[str]] = {}
-    for doc_id in ids:
-        ruta_rel = documentos[doc_id].get("_ruta", "")
-        if not isinstance(ruta_rel, str) or not ruta_rel:
-            continue
-        ruta = (raiz / ruta_rel).resolve()
-        if not ruta.is_relative_to(raiz) or not ruta.is_file():
-            continue
-        try:
-            texto = ruta.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        terminos[doc_id] = legalize_tokenizer.tokens_de_documento(texto)
-    return terminos
-
-
-def _postings_finales(previos, documentos: dict, terminos_por_doc: dict[str, set[str]],
-                      repo_dir: Path) -> dict[str, list[str]]:
-    """Los postings que corresponden exactamente a los documentos del JSON.
-
-    Es la invariante de FR-001: tras cualquier pasada, ni más ni menos que los
-    términos de los documentos que el índice tiene en ese momento.
-
-    FUSIONAR, si los postings previos se pueden usar: de cada término se
-    conservan los documentos que siguen en el JSON y no se han reprocesado en
-    esta pasada, y se añaden los términos de los reprocesados. Así no hace falta
-    seguir por separado cada forma de salir del índice — cuarentena, cambio de
-    identificador, huérfano retirado, duplicado —: lo que ya no está en el JSON
-    no se conserva. Medido sobre el corpus español: 10,2 s con un 5% de cambios,
-    frente a 49 s de retokenizarlo todo (research.md, R2).
-
-    RECONSTRUIR, si no se pueden usar o una lista resulta corrupta al
-    decodificarla: se tokenizan desde disco todos los documentos del JSON que
-    esta pasada no haya procesado ya.
-    """
-    nuevos = _invertir(terminos_por_doc)
-    if previos is not None:
-        descartar = {i for i, doc_id in enumerate(previos.ids)
-                     if doc_id not in documentos or doc_id in terminos_por_doc}
-        try:
-            for termino in previos.terminos():
-                indices = previos.indices(termino)
-                if descartar:
-                    indices = indices - descartar
-                if indices:
-                    nuevos.setdefault(termino, []).extend(previos.ids[i] for i in indices)
-            return nuevos
-        except ValueError as exc:
-            print(f"\n[AVISO] postings previos ilegibles al fusionar ({exc}); "
-                  f"se reconstruyen.", file=sys.stderr)
-            nuevos = _invertir(terminos_por_doc)
-
-    faltan = [d for d in documentos if d not in terminos_por_doc]
-    for termino, docs in _invertir(_terminos_en_disco(documentos, faltan, repo_dir)).items():
-        nuevos.setdefault(termino, []).extend(docs)
-    return nuevos
-
-
-def _write_invertido(index_path: Path, postings: dict[str, list[str]],
-                     generacion: str) -> int:
-    """Escribe los postings y devuelve cuántos términos tienen.
-
-    El formato lo decide `legalize_postings`, no este script: antes esto era un
-    `pickle.dump`, y el servidor lo cargaba con `pickle.load` sobre un fichero
-    que cualquiera con escritura en `indices/` podía sustituir (spec 001).
-
-    Lleva su propia huella del tokenizador y la generación del JSON al que
-    acompaña: unos postings separados de su índice siguen siendo legibles, y
-    tienen que poder decir con qué reglas y para qué índice se construyeron.
-
-    Tras escribirlos, el `.bin` del formato anterior se borra: dejarlo al lado
-    sería un fichero más que alguien podría intentar que se leyera.
-    """
-    nombre = _nombre_repo(index_path)
-    n = legalize_postings.escribir(
-        legalize_postings.ruta_postings(index_path.parent, nombre),
-        postings,
-        tokenizador=legalize_tokenizer.huella(), generacion=generacion,
-    )
-    legalize_postings.ruta_formato_anterior(index_path.parent, nombre).unlink(missing_ok=True)
-    return n
-
-def _escribir_base_de_datos(destino: Path, data: dict, repo_dir: Path) -> None:
-    """Escribe el índice en el formato de la spec 002, con lo mismo que el JSON.
-
-    Transitorio: mientras el servidor siga leyendo el JSON, el indexador
-    escribe los dos, y un test exige que contengan lo mismo. Se reconstruye
-    entera en cada pasada leyendo el cuerpo de cada documento; cuando el JSON
-    se retire, la pasada incremental pasará a hacerse sobre la propia base de
-    datos.
-
-    La ruta de cada documento sale del índice, así que se lee con la misma
-    contención que `_terminos_en_disco`: dentro de `repo_dir` y fichero
-    regular, o el documento se escribe sin cuerpo.
-    """
-    raiz = repo_dir.resolve()
-    escritor = legalize_indice.Escritor(destino)
+    vacio = {"_meta": {}, "documentos": {}}
+    if not index_path.exists():
+        if index_path.with_suffix(".json").exists():
+            return vacio, "formato anterior"
+        return vacio, None
+    print(f"Cargando índice: {index_path} …")
     try:
-        for doc_id, entry in data.get("documentos", {}).items():
-            cuerpo = ""
-            ruta_rel = entry.get("_ruta", "")
-            if isinstance(ruta_rel, str) and ruta_rel:
-                ruta = (raiz / ruta_rel).resolve()
-                if ruta.is_relative_to(raiz) and ruta.is_file():
-                    try:
-                        cuerpo = legalize_frontmatter.cuerpo(
-                            ruta.read_text(encoding="utf-8", errors="replace"))
-                    except OSError:
-                        pass
-            escritor.poner_ley(doc_id, entry, cuerpo)
-        for clave, valor in data.get("_meta", {}).items():
-            if clave not in ("total_documentos", "generacion"):
-                escritor.poner_meta(clave, valor)
-    except BaseException:
-        escritor.descartar()
-        raise
-    escritor.confirmar()
+        return legalize_indice.como_dict(index_path), None
+    except ValueError as exc:
+        return vacio, str(exc)
 
-
-def _write_atomic(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp", prefix=".index_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 class _Progress:
     """Reporta avance a stderr durante el escaneo.
@@ -492,17 +356,6 @@ class _Progress:
             f"{self.bytes / 1_048_576:,.0f} MiB en {transcurrido:.1f}s ({mibs:,.0f} MiB/s)"
         )
 
-def _load_index(index_path: Path) -> dict:
-    if not index_path.exists():
-        return {"_meta": {}, "documentos": {}}
-    print(f"Cargando índice: {index_path} …")
-    try:
-        with index_path.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception as exc:
-        print(f"[ERROR] Índice corrupto: {exc}. Reconstruyendo.", file=sys.stderr)
-        return {"_meta": {}, "documentos": {}}
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Mantiene índices de repositorios legales Legalize con detección de seguridad."
@@ -511,7 +364,8 @@ def main() -> None:
     parser.add_argument("--repo", type=Path,
                         help="Directorio del repositorio de un país (ej. repos/legalize-es).")
     parser.add_argument("--index", type=Path,
-                        help="Ruta al index JSON a generar. Si no se indica, va a indices/.")
+                        help="Ruta a la base de datos del índice (index_<repo>.db). Si no se "
+                             "indica, va a indices/. Una ruta .json se toma como su .db.")
     parser.add_argument("--pais", type=str,
                         help="Código de país a usar como fallback si no se especifica en yaml (ej. es).")
     parser.add_argument("--force-all", action="store_true",
@@ -555,14 +409,20 @@ def main() -> None:
     index_path = args.index
     if not index_path:
         DEFAULT_INDICES_DIR.mkdir(parents=True, exist_ok=True)
-        index_path = DEFAULT_INDICES_DIR / f"index_{repo_name}.json"
+        index_path = legalize_indice.ruta_indice(DEFAULT_INDICES_DIR, repo_name)
+    # Quien pasaba la ruta del JSON sigue funcionando: el índice es su `.db`, y
+    # el JSON, si existe, se migra y se retira.
+    index_path = index_path.with_suffix(".db")
 
     print(f"Indexando repositorio: {repo_dir}")
     print(f"Archivo de índice  : {index_path}")
 
-    data = _load_index(index_path)
-    documentos: dict = data.setdefault("documentos", {})
-    meta_idx: dict = data.setdefault("_meta", {})
+    data, motivo_reconstruir = _cargar_indice(index_path)
+    if motivo_reconstruir:
+        print(f"Índice            : se reconstruye entero ({motivo_reconstruir})")
+    documentos: dict = data["documentos"]
+    meta_idx: dict = data["_meta"]
+    meta_idx.pop("total_documentos", None)
 
     ruta_a_docid: dict[str, str] = {}
     for k, v in documentos.items():
@@ -610,7 +470,16 @@ def main() -> None:
         print("                    Se reescanea el corpus completo: la auditoría "
               "anterior ya no es\n                    comparable.")
 
-    forzar = args.force_all or ruleset_cambiado
+    # El texto buscable se guarda plegado y tokenizado con las reglas de hoy. Si
+    # el índice se construyó con otras, no se puede mezclar con lo que se
+    # escriba ahora: se rehacen todos los cuerpos, conservando ids y orden. Es
+    # lo que mira `check_updates.py` para decir TOKENS, así que el remedio que
+    # propone no puede contestar "ya está al día" (spec 001, US5).
+    tokenizador_cambiado = bool(documentos) and meta_idx.get("tokenizador") != legalize_tokenizer.huella()
+    if tokenizador_cambiado:
+        print("Texto buscable    : se rehace entero (tokenizador_distinto)")
+
+    forzar = args.force_all or ruleset_cambiado or tokenizador_cambiado
 
     nuevos = []
     actualizados = []
@@ -632,30 +501,35 @@ def main() -> None:
     print(f"Modificados       : {len(actualizados):,}")
     print(f"Huérfanos         : {len(huerfanos):,}")
 
-    # Los postings previos se fusionan si se pueden usar y se reconstruyen si
-    # no. Antes se reescribían solo con los documentos de esta pasada, así que
-    # tras un `git pull` la búsqueda por texto perdía el resto del corpus sin
-    # decir nada (spec 001, US1). `estado` decide igual que el servidor: mismo
-    # formato, mismo tokenizador y misma generación que este JSON.
-    postings_previos, motivo_previo = legalize_postings.estado(
-        index_path.parent, _nombre_repo(index_path),
-        legalize_tokenizer.huella(), meta_idx.get("generacion"),
-    )
-    # El sello del JSON cuenta igual que la cabecera de los postings. Es el que
-    # mira `check_updates.py` para decir TOKENS, así que si no forzara nada aquí,
-    # el remedio que propone respondería "ya está al día" y el aviso volvería
-    # en cada pasada (spec 001, US5; FR-013, FR-014).
-    if (motivo_previo is None and documentos
-            and meta_idx.get("tokenizador") != legalize_tokenizer.huella()):
-        postings_previos, motivo_previo = None, legalize_postings.TOKENIZADOR_DISTINTO
-    if motivo_previo is not None and documentos:
-        print(f"Índice invertido  : se reconstruye ({motivo_previo})")
-
-    # "Al día" exige también unos postings utilizables: un JSON correcto con los
-    # postings ausentes, de otra generación o de otro tokenizador no lo está.
-    if not nuevos and not actualizados and not huerfanos and motivo_previo is None:
+    anteriores = [f for f in _ficheros_anteriores(index_path) if f.exists()]
+    if (not nuevos and not actualizados and not huerfanos
+            and index_path.exists() and not motivo_reconstruir and not anteriores):
         print("\nEl índice ya está al día.")
         return
+
+    # Toda la pasada escribe sobre una copia del índice vigente, o sobre uno
+    # vacío si no hay base utilizable, y la sustituye entera al final. Cada
+    # cambio que se hace en `documentos` se repite aquí en el mismo orden, así
+    # que la posición de cada ley es la que tendría reconstruyendo desde cero.
+    base = index_path if index_path.exists() and not motivo_reconstruir else None
+    escritor = legalize_indice.Escritor(index_path, base=base)
+    try:
+        _pasada(args, repo_dir, fallback_pais, index_path, escritor, documentos, meta_idx,
+                md_files, md_stats, ruta_a_docid, nuevos + actualizados, huerfanos, huella_actual)
+    except BaseException:
+        escritor.descartar()
+        raise
+
+
+def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
+            escritor, documentos: dict, meta_idx: dict, md_files: dict, md_stats: dict,
+            ruta_a_docid: dict, pendientes: list[str], huerfanos: list[str],
+            huella_actual: str) -> None:
+    """Escanea lo pendiente, lo escribe en `escritor` y confirma el índice."""
+
+    def quitar(doc_id: str) -> None:
+        if documentos.pop(doc_id, None) is not None:
+            escritor.quitar_ley(doc_id)
 
     errores = 0
     # Ficheros excluidos del índice por hallazgos de severidad `block`.
@@ -673,17 +547,13 @@ def main() -> None:
     metadatos: dict[str, list[str]] = {}
     # Ficheros con algún valor de frontmatter por encima de `_MAX_META_CHARS`.
     truncados: dict[str, list[str]] = {}
-    # Términos de cada documento aceptado, para volcar al índice invertido.
-    terminos_por_doc: dict[str, set[str]] = {}
-
-    pendientes = nuevos + actualizados
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
 
     for rel in pendientes:
         md_path = md_files[rel]
         progreso.avanzar(md_stats[rel].size)
         try:
-            doc_id, entry, hallazgos, hallazgos_meta, campos_truncados, terminos = _build_entry(
+            doc_id, entry, hallazgos, hallazgos_meta, campos_truncados, cuerpo = _build_entry(
                 md_path, md_stats[rel], repo_dir, fallback_pais)
         except Exception as exc:
             _warn(f"Error en {rel}: {exc}")
@@ -721,12 +591,12 @@ def main() -> None:
                 # se retira: dejarlo servido sería peor que no tenerlo.
                 old_doc_id = ruta_a_docid.get(rel)
                 if old_doc_id:
-                    documentos.pop(old_doc_id, None)
+                    quitar(old_doc_id)
                 continue
 
         old_doc_id = ruta_a_docid.get(rel)
-        if old_doc_id and old_doc_id != doc_id and old_doc_id in documentos:
-            del documentos[old_doc_id]
+        if old_doc_id and old_doc_id != doc_id:
+            quitar(old_doc_id)
 
         # El `identificador` sale del frontmatter, que es contenido no fiable, y
         # es lo único que el corpus decide y que además es una CLAVE. Sin esta
@@ -744,13 +614,13 @@ def main() -> None:
             entry["identificador"] = doc_id
 
         documentos[doc_id] = entry
-        # Los términos se registran AQUÍ y no al construir la entrada: aquí el
+        # El cuerpo se escribe AQUÍ y no al construir la entrada: aquí el
         # documento ya ha superado la cuarentena y el `doc_id` ya es el
-        # definitivo tras resolver duplicados. Indexar antes dejaría un
+        # definitivo tras resolver duplicados. Escribirlo antes dejaría un
         # documento en cuarentena encontrable por búsqueda aunque
         # `obtener_ley` se negara a servirlo, que es un agujero y no una
         # defensa.
-        terminos_por_doc[doc_id] = terminos
+        escritor.poner_ley(doc_id, entry, cuerpo)
 
     progreso.cerrar()
 
@@ -809,7 +679,7 @@ def main() -> None:
 
     if args.remove_orphans:
         for doc_id in huerfanos:
-            documentos.pop(doc_id, None)
+            quitar(doc_id)
 
     try:
         base_dir_str = repo_dir.relative_to(_PROJECT_DIR).as_posix()
@@ -817,7 +687,6 @@ def main() -> None:
         base_dir_str = str(repo_dir)
 
     meta_idx["generado_en"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    meta_idx["total_documentos"] = len(documentos)
     meta_idx["directorio_base"] = base_dir_str
     meta_idx["pais_predeterminado"] = fallback_pais
     meta_idx.setdefault("version", "2.0.0")
@@ -877,56 +746,30 @@ def main() -> None:
         # de otro repositorio, que es justo lo que hacía antes.
         meta_idx.pop("git_commit", None)
 
-    # Los postings van PRIMERO y el JSON después: el JSON es el punto de
-    # confirmación. Si se interrumpe entre los dos, el JSON viejo conserva su
-    # generación vieja, el desajuste se detecta y la pasada siguiente
-    # reconstruye (research.md, R3).
-    print("Escribiendo índice invertido …", end=" ", flush=True)
-    generacion = legalize_postings.nueva_generacion()
-    try:
-        postings = _postings_finales(
-            postings_previos, documentos, terminos_por_doc, repo_dir)
-        n_terminos = _write_invertido(index_path, postings, generacion)
-        print("OK")
-    except Exception as exc:
-        # El índice JSON sigue siendo utilizable sin el invertido: la búsqueda a
-        # texto completo se degrada, el resto del servidor no. Fallar entero
-        # aquí convertiría un problema de una función en uno de todas.
-        print(f"\n[ERROR] no se pudo escribir el índice invertido: {exc}",
-              file=sys.stderr)
-        n_terminos = 0
-        generacion = None
-
-    # Con qué tokenizador se construyó el invertido y a qué generación
-    # pertenece. Mismo motivo que la huella del ruleset: sin estos sellos no hay
-    # forma de distinguir unos postings buenos de unos construidos con reglas que
-    # ya no existen, o para otro JSON.
-    #
-    # Solo se escriben si los postings se escribieron de verdad (FR-015). Un
-    # sello sin postings detrás afirma algo falso, y la pasada siguiente no
-    # sabría que tiene que reconstruirlos.
-    if generacion:
-        meta_idx["tokenizador"] = legalize_tokenizer.huella()
-        meta_idx["generacion"] = generacion
-    else:
-        meta_idx.pop("tokenizador", None)
-        meta_idx.pop("generacion", None)
+    # Todo el texto buscable de este índice está plegado y tokenizado con las
+    # reglas de hoy: lo que no se reescribió en esta pasada ya lo estaba, o el
+    # cambio de tokenizador habría forzado reescribirlo.
+    meta_idx["tokenizador"] = legalize_tokenizer.huella()
+    # La generación ataba el JSON a sus postings; dentro de una sola base de
+    # datos no hay nada que atar.
+    meta_idx.pop("generacion", None)
 
     print(f"Escribiendo índice ({len(documentos):,} docs) …", end=" ", flush=True)
+    escritor.reemplazar_meta(meta_idx)
+    n_terminos = escritor.contar_terminos()
     try:
-        _write_atomic(index_path, data)
+        escritor.confirmar()
         print("OK")
     except Exception as exc:
         print(f"\n[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print("Escribiendo base de datos …", end=" ", flush=True)
-    try:
-        _escribir_base_de_datos(index_path.with_suffix(".db"), data, repo_dir)
-        print("OK")
-    except Exception as exc:
-        print(f"\n[ERROR] no se pudo escribir la base de datos: {exc}", file=sys.stderr)
-        sys.exit(1)
+    # Solo ahora, con la base de datos en su sitio, desaparece el formato
+    # anterior: si la pasada hubiera fallado, seguiría ahí para la siguiente.
+    for anterior in _ficheros_anteriores(index_path):
+        if anterior.exists():
+            anterior.unlink()
+            print(f"Formato anterior  : retirado {anterior.name}")
 
     seguridad = meta_idx["seguridad"]
     print(f"Indexados         : {len(documentos):,}")

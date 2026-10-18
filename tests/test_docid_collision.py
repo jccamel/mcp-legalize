@@ -25,7 +25,6 @@ The collision is reported and counted like quarantine is. Silence was the actual
 defect — losing the document was the consequence.
 """
 
-import json
 
 import pytest
 
@@ -45,10 +44,7 @@ def indexar(indexer_cli):
     """Ejecuta el indexador y devuelve (índice cargado, salida combinada)."""
     def correr(*extra_args):
         proc = indexer_cli.correr("--pais", "tst", *extra_args)
-        datos = (
-            json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-            if indexer_cli.indice.exists() else {}
-        )
+        datos = indexer_cli.leer()
         return datos, proc.stdout + proc.stderr
     correr.repo = indexer_cli.repo
     return correr

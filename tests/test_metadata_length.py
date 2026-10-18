@@ -25,7 +25,6 @@ that #20 was filed for; the operator should be able to tell a hostile corpus
 from an unusually verbose one.
 """
 
-import json
 
 import pytest
 
@@ -36,10 +35,7 @@ import mcp_legalize
 def indexar(indexer_cli):
     def correr(*extra_args):
         proc = indexer_cli.correr("--pais", "tst", *extra_args)
-        datos = (
-            json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-            if indexer_cli.indice.exists() else {}
-        )
+        datos = indexer_cli.leer()
         return datos, proc.stdout + proc.stderr
     correr.repo = indexer_cli.repo
     return correr

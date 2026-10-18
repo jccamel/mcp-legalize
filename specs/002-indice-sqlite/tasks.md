@@ -129,7 +129,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
     `git_commit` y `generado_en`.
 
   En esta tarea, cualquier pasada es completa; la incremental llega en US4.
-- [ ] T011 Migrar los tests del grupo «Lectura del índice generado» de [plan.md](plan.md):
+- [X] T011 Migrar los tests del grupo «Lectura del índice generado» de [plan.md](plan.md):
   - `test_ruleset_stamp`, `test_repo_identity`, `test_docid_collision`,
     `test_metadata_scan`, `test_metadata_length` y `test_frontmatter`;
   - la parte del indexador de `test_estado_del_texto`, `test_incremental_postings` y
@@ -141,7 +141,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   cuerpos=None)`. Escribe una base de datos real en `tmp_path` con `legalize_indice.Escritor`,
   crea los ficheros del cuerpo bajo un `LEGALIZE_REPOS_DIR` temporal y la registra en el
   servidor por la vía de carga normal.
-- [ ] T013 Ejecutar la suite: solo pueden fallar los tests del servidor, que aún leen de
+- [X] T013 Ejecutar la suite: solo pueden fallar los tests del servidor, que aún leen de
   memoria. Commit `feat(index): write the per-corpus database instead of JSON and postings`.
 
 **Checkpoint**: el indexador produce bases de datos válidas; el servidor aún no las lee.
@@ -247,16 +247,16 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 **Independent Test**: quickstart §7 y la propiedad incremental = completo.
 
-- [ ] T024 [P] [US4] En `tests/test_incremental_postings.py`, ya migrado en T011,
+- [X] T024 [P] [US4] En `tests/test_incremental_postings.py`, ya migrado en T011,
   confirmar que los escenarios de la spec 001 siguen en verde sobre la base de datos. Añadir:
   - una interrupción simulada (`Escritor.confirmar` parcheado para lanzar a mitad): la base
     de datos anterior queda intacta y el temporal desaparece;
   - un índice solo en formato anterior: la pasada lo migra sin flags y borra el `.json` y el
     `.postings`.
-- [ ] T025 [P] [US4] En `tests/test_inverted_index.py`, el ciclo «estado caducado → remedio →
+- [X] T025 [P] [US4] En `tests/test_inverted_index.py`, el ciclo «estado caducado → remedio →
   limpio» con `FORMATO` en lugar de `POSTINGS` (formato anterior, formato distinto, esquema
   inesperado), además de `TOKENS` y `REGLAS`.
-- [ ] T026 [US4] Implementar en `scripts/update_index.py` la pasada incremental:
+- [X] T026 [US4] Implementar en `scripts/update_index.py` la pasada incremental:
   1. copia la base de datos vigente a un temporal (research R1);
   2. recalcula las leyes con cambio de tamaño o `mtime`, los huérfanos con
      `--remove-orphans`, las cuarentenas y los renombrados, en una transacción;
@@ -264,10 +264,10 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
   El reescaneo completo cuando cambian `patrones`, `tokenizador` o `formato` se mantiene. Si
   `os.replace` falla en Windows con el fichero abierto, avisar y conservar el temporal.
-- [ ] T027 [US4] En `scripts/check_updates.py`, leer los sellos con
+- [X] T027 [US4] En `scripts/check_updates.py`, leer los sellos con
   `legalize_indice.abrir` y `meta`. Desaparece `POSTINGS` y aparece `FORMATO`, con el remedio
   `update_index.py --repo <dir>`.
-- [ ] T028 [US4] Medir la pasada incremental del 1 % y del 5 % de ES (presupuesto de la
+- [X] T028 [US4] Medir la pasada incremental del 1 % y del 5 % de ES (presupuesto de la
   spec 001: ≤ 20 s) y anotarla en Notes. Commit
   `feat(index): incremental runs inside one transaction, swapped in whole`.
 
@@ -410,4 +410,17 @@ Cada una pasa la CI por sí sola.
   - `test_bytes_degradation` manipula la columna `bytes` del `.db` con valores que SQLite puede guardar (texto, real, blob). Al migrarlo apareció un defecto: dos tamaños de 2^63−1 desbordaban `sum(bytes)` en `listar_paises`. Ahora se usa `total()` solo sobre enteros.
   - T022: `test_index_shape` → `test_indice_degradacion.py`; `test_search_normalization_cache` → `test_titulo_plegado_al_indexar.py`. Las comillas de `terminos_fts` tienen su propio test: el tokenizador ya impide hoy que llegue sintaxis, así que los tests a través de las herramientas no las cubrían.
 - Paridad de US1 (T023, 2026-10-18): 1.178 peticiones, 0 diferencias con `referencia-main.json`. Los cuatro corpus se reindexaron con `--force-all`: sin cambios, la pasada incremental no escribe el `.db`, y eso lo resuelve T024. El `.db` de `mock` se generó aparte para el banco; el del repositorio llega en T035. Sin él, las 7 diferencias eran todas de `mock`. Tamaños: es 530 MB, eu 248 MB, fr 77 MB, se 42 MB.
-- Mediciones (T028, T031, T034, T040): _pendiente_
+- US4 (2026-10-18), con el plan y los cambios de tests aprobados por el usuario:
+  - La pasada escribe sobre una copia del `.db` vigente y repite en el `Escritor`, en el mismo orden, cada cambio de `documentos`, así que la posición de cada ley es la de una reconstrucción. Un `.db` ausente, ilegible, de otro formato o con otro esquema se reconstruye entero. Un JSON sin `.db` se migra sin flags y después se borran `.json`, `.postings` y `.bin`. Si cambia el tokenizador, se rehacen todos los cuerpos conservando ids y orden.
+  - T013 queda absorbida aquí: el indexador ya no escribe JSON ni postings. `--index` acepta una ruta `.json` y la toma como su `.db`.
+  - Tests sustituidos según la tabla aprobada:
+    - los de postings ausentes o de otra generación pasan a «`.db` ausente / inutilizable se reconstruye»;
+    - el de escritura fallida de postings pasa al de interrupción;
+    - el de la huella dentro del fichero de postings se retira;
+    - el del `.bin` pasa a «la migración borra el formato anterior».
+  - `test_indice_desde_indexador` deja de comparar con el JSON y compara con el corpus y con una reconstrucción.
+  - `check_updates.py`: `POSTINGS` → `FORMATO` (formato anterior, distinto, esquema inesperado e ilegible). Al migrarlo apareció que un valor de `meta` de otro tipo tiraba el informe (`TypeError` con `directorio_base` numérico); ahora degrada esa comprobación. Tiene test.
+  - Si `os.replace` falla (Windows con el servidor abierto), el temporal se conserva y el error dice dónde está. Sin test: no se reproduce en macOS.
+- Mediciones:
+  - T028 (2026-10-18, ES, 25.889 leyes): migración sin cambios 2,96 s; pasada incremental del 1 % (258 ficheros) 6,7 s; del 5 % (1.294) 12,2 s. Presupuesto de la spec 001: ≤ 20 s. Paridad tras migrar y dos pasadas incrementales: 0 diferencias en 1.178 peticiones.
+  - T031, T034, T040: _pendiente_

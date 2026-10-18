@@ -14,7 +14,7 @@ Salida de ejemplo:
     [AT] SIN GIT   — repos/legalize-at no es un repositorio git
     [PT] VACÍO     — el repositorio no tiene commits
     [ES] REGLAS    — auditado con 03446b5a64e4, el escáner está en 9f21c0a3e1bb
-    [SE] POSTINGS  — formato_anterior
+    [SE] FORMATO   — formato_distinto
 
 Comprueba además con qué reglas de escaneo se auditó cada índice. Un índice
 puede estar al día en commits y aun así llevar hallazgos calculados con un
@@ -22,7 +22,6 @@ ruleset que ya no existe, porque una pasada incremental no vuelve a mirar los
 ficheros que no cambiaron en disco.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -36,10 +35,20 @@ _REPOS_DIR   = _PROJECT_DIR / "repos"
 if str(_PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(_PROJECT_DIR))
 
-import legalize_injection  # noqa: E402  (requiere el sys.path de arriba)
-import legalize_postings  # noqa: E402  (idem)
+import legalize_indice  # noqa: E402  (requiere el sys.path de arriba)
+import legalize_injection  # noqa: E402  (idem)
 import legalize_repo  # noqa: E402  (idem)
 import legalize_tokenizer  # noqa: E402  (idem)
+
+
+def _texto(meta: dict, clave: str) -> str:
+    """Un valor de `meta` si es texto, o "" si no.
+
+    La meta sale del índice, que es entrada no confiable (principio II): un
+    valor de otro tipo cuesta esa comprobación, nunca el informe entero.
+    """
+    valor = meta.get(clave, "")
+    return valor if isinstance(valor, str) else ""
 
 
 def main() -> None:
@@ -61,18 +70,36 @@ def main() -> None:
     huella_actual = legalize_injection.huella()
     huella_tok_actual = legalize_tokenizer.huella()
 
-    for index_path in sorted(_INDICES_DIR.glob("index_*.json")):
+    # El formato es el primer estado y el que tapa a los demás: un índice que
+    # el servidor no abriría no tiene sellos fiables que comparar. Lo decide
+    # `legalize_indice.abrir`, lo mismo que el servidor al arrancar, así que
+    # este informe no puede discrepar de lo que el servidor va a hacer. El
+    # remedio es el comando de siempre, sin flags: el indexador migra el
+    # formato anterior y reconstruye lo que no se puede abrir.
+    anteriores = [j.with_suffix(".db") for j in _INDICES_DIR.glob("index_*.json")
+                  if not j.with_suffix(".db").exists()]
+    for index_path in sorted({*_INDICES_DIR.glob("index_*.db"), *anteriores}):
+        nombre = index_path.stem.removeprefix("index_")
         try:
-            with index_path.open("r", encoding="utf-8") as f:
-                meta = json.load(f).get("_meta", {})
-        except Exception as exc:
-            print(f"[??] {index_path.name}: error al leer — {exc}")
+            if not index_path.exists():
+                raise ValueError("formato anterior")
+            con = legalize_indice.abrir(index_path)
+            try:
+                meta = legalize_indice.leer_meta(con)
+            finally:
+                con.close()
+        except ValueError as exc:
+            print(
+                f"[{nombre.removeprefix('legalize-').upper():4}] FORMATO   — {exc}"
+                f"\n           → python scripts/update_index.py --repo repos/{nombre}"
+            )
+            outdated.append(nombre)
             continue
 
-        pais = meta.get("pais_predeterminado") or index_path.stem.replace("index_", "")
+        pais = _texto(meta, "pais_predeterminado") or nombre
         label = f"[{pais.upper():4}]"
-        dir_base = meta.get("directorio_base", "")
-        indexed_commit = meta.get("git_commit", "")
+        dir_base = _texto(meta, "directorio_base")
+        indexed_commit = _texto(meta, "git_commit")
 
         if not dir_base:
             print(f"{label} SIN RUTA  — el índice no tiene 'directorio_base'")
@@ -85,7 +112,8 @@ def main() -> None:
 
         # El ruleset es ortogonal al commit: un índice puede estar al día en
         # disco y llevar una auditoría hecha con reglas ya retiradas.
-        huella_indice = (meta.get("seguridad") or {}).get("patrones", "")
+        seguridad = meta.get("seguridad")
+        huella_indice = _texto(seguridad if isinstance(seguridad, dict) else {}, "patrones")
         if huella_indice != huella_actual:
             if huella_indice:
                 motivo = (f"auditado con {huella_indice}, "
@@ -104,7 +132,7 @@ def main() -> None:
         # día en disco y auditado con las reglas vigentes, y aun así llevar
         # listas de postings construidas con un patrón de token, una longitud
         # mínima o una tabla de normalización que ya cambiaron.
-        huella_tok_indice = meta.get("tokenizador", "")
+        huella_tok_indice = _texto(meta, "tokenizador")
         if huella_tok_indice != huella_tok_actual:
             if huella_tok_indice:
                 motivo = (f"tokenizado con {huella_tok_indice}, "
@@ -117,24 +145,6 @@ def main() -> None:
                           f"el tokenizador está en {huella_tok_actual}")
             print(
                 f"{label} TOKENS    — {motivo}"
-                f"\n           → python scripts/update_index.py --repo {dir_base}"
-            )
-            outdated.append(pais)
-
-        # Los postings son el cuarto estado y tampoco depende de los otros: un
-        # índice al día en commits, reglas y tokenizador puede tener sus
-        # postings ausentes, en el formato anterior o emparejados con otro JSON.
-        # Lo decide `legalize_postings.estado`, lo mismo que consulta el
-        # servidor antes de buscar, así que este informe no puede discrepar de
-        # lo que el servidor va a hacer. El remedio es el mismo comando sin
-        # `--force-all`: el indexador reconstruye solo lo que haga falta.
-        _, motivo_postings = legalize_postings.estado(
-            _INDICES_DIR, index_path.stem.removeprefix("index_"),
-            huella_tok_actual, meta.get("generacion"),
-        )
-        if motivo_postings is not None:
-            print(
-                f"{label} POSTINGS  — {motivo_postings}"
                 f"\n           → python scripts/update_index.py --repo {dir_base}"
             )
             outdated.append(pais)
