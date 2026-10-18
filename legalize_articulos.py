@@ -212,6 +212,7 @@ def localizar_todos(cuerpo: str) -> list[tuple[int, str, str, int, int, int, boo
         clave = (numero.casefold(), ubicacion)
         vistas[clave] = vistas.get(clave, 0) + 1
         if vistas[clave] > 1:
-            ubicacion = f"{ubicacion} ({vistas[clave]})"
+            # Sin encabezados por encima, la marca va sola: "(2)", no " (2)".
+            ubicacion = f"{ubicacion} ({vistas[clave]})".lstrip()
         resultado.append((orden, numero, ubicacion, inicio, fin_enc, fin, abierto_))
     return resultado

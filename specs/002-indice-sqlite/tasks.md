@@ -280,7 +280,7 @@ FR-016).
 
 **Independent Test**: paridad de artículos y quickstart §6.
 
-- [ ] T029 [P] [US5] Crear `tests/test_indice_articulos.py`:
+- [X] T029 [P] [US5] Crear `tests/test_indice_articulos.py`:
   - para cada documento de los tests de artículos existentes, más un corpus sintético con
     `1 §` repetido por capítulo, los `(inicio, fin)` de la primera aparición en
     `articulos` coinciden con `_localizar_articulo(cuerpo, n, contexto)`;
@@ -288,7 +288,7 @@ FR-016).
   - una `capitulo` desconocida da «Artículo no encontrado» con `ubicaciones`;
   - un número único da `ubicaciones=None`;
   - las ubicaciones pasan por `_sanitize_metadata`.
-- [ ] T030 [US5] En `mcp_legalize.py`, `obtener_articulo` lee la fila por
+- [X] T030 [US5] En `mcp_legalize.py`, `obtener_articulo` lee la fila por
   `(ley, numero COLLATE NOCASE)` en orden:
   - sin `capitulo`, la primera; con `capitulo`, la de esa ubicación exacta;
   - `ArticuloResultado` gana `ubicacion` y `ubicaciones`; esta última solo si hay más de una
@@ -297,7 +297,7 @@ FR-016).
   - sin filas, recurre a `_localizar_articulo` sobre el fichero (documentos sin encabezados).
 
   Parámetro nuevo opcional: `capitulo: str = ""`.
-- [ ] T031 [US5] Repetir la medición de artículos de la sesión del 2026-10-18 (ES, SE, FR
+- [X] T031 [US5] Repetir la medición de artículos de la sesión del 2026-10-18 (ES, SE, FR
   con muestreo y EU) con la rama: ningún inicio equivocado, corte, desborde ni prefijo
   fantasma. Medir SC-008 sobre una muestra sueca. Commit
   `feat: articles located at index time, and repeated numbers reachable by chapter`.
@@ -423,4 +423,16 @@ Cada una pasa la CI por sí sola.
   - Si `os.replace` falla (Windows con el servidor abierto), el temporal se conserva y el error dice dónde está. Sin test: no se reproduce en macOS.
 - Mediciones:
   - T028 (2026-10-18, ES, 25.889 leyes): migración sin cambios 2,96 s; pasada incremental del 1 % (258 ficheros) 6,7 s; del 5 % (1.294) 12,2 s. Presupuesto de la spec 001: ≤ 20 s. Paridad tras migrar y dos pasadas incrementales: 0 diferencias en 1.178 peticiones.
-  - T031, T034, T040: _pendiente_
+  - T031 (2026-10-18): para la primera aparición de cada número, las filas dan el mismo `(inicio, corte, fin)` que `localizar`. Ningún inicio fuera de un encabezado, ningún final fuera de sitio y ningún encabezado que no nombre su número:
+    - se: 8.990 leyes, 167.839 filas, 0 distintos de 126.898 números;
+    - es: 25.889 leyes, 406.686 filas, 0 de 393.060;
+    - eu: 18.606 leyes, 108.742 filas, 0 de 107.538;
+    - fr: muestra de 20 leyes, 45.644 filas, 0 de 41.776. Tardó 896 s: comparar contra `localizar` es cuadrático en los códigos franceses, justo el coste que las filas quitan al servidor.
+
+    SC-008: en se, las 49.032 apariciones de números repetidos se obtienen todas con `capitulo` (100 %).
+  - Ajustes en US5:
+    - Una repetición sin encabezados por encima se marca `(2)`, no ` (2)`.
+    - Con un `capitulo` que no corresponde, `ubicaciones` se lista aunque el número sea único.
+    - Los tests de artículos que ya existían instalan ahora el cuerpo real (antes parcheaban `_read_file`), así que pasan por las filas: si se sabotea el corte, fallan 23.
+    - El banco ignora los campos nuevos del contrato (`ubicacion`, `ubicaciones`) cuando la referencia no los tiene, y cuenta aparte cuántas respuestas los traen rellenos.
+  - T034, T040: _pendiente_

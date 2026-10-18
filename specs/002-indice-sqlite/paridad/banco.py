@@ -127,8 +127,32 @@ def ejecutar(raiz: Path, salida: Path):
     print(f"{len(resultados):,} peticiones -> {salida}")
 
 
+# Campos que el contrato añade (contracts/herramientas-mcp.md). Se comparan
+# solo si la referencia los tiene; si no, se cuentan aparte.
+CAMPOS_NUEVOS = {"ubicacion", "ubicaciones"}
+
+
+def _sin_nuevos(valor, referencia, rellenos):
+    if isinstance(valor, list) and isinstance(referencia, list):
+        return [_sin_nuevos(v, r, rellenos) for v, r in zip(valor, referencia)] + valor[len(referencia):]
+    if isinstance(valor, dict) and isinstance(referencia, dict):
+        salida = {}
+        for k, v in valor.items():
+            if k in CAMPOS_NUEVOS and k not in referencia:
+                if v is not None:
+                    rellenos[k] = rellenos.get(k, 0) + 1
+                continue
+            salida[k] = _sin_nuevos(v, referencia.get(k), rellenos)
+        return salida
+    return valor
+
+
 def comparar(a: Path, b: Path):
     ra, rb = json.loads(a.read_text(encoding="utf-8")), json.loads(b.read_text(encoding="utf-8"))
+    rellenos: dict[str, int] = {}
+    rb = {k: _sin_nuevos(v, ra.get(k), rellenos) for k, v in rb.items()}
+    if rellenos:
+        print(f"campos nuevos rellenos (no se comparan): {rellenos}")
     solo_a, solo_b = sorted(set(ra) - set(rb)), sorted(set(rb) - set(ra))
     distintas = [k for k in sorted(set(ra) & set(rb)) if ra[k] != rb[k]]
     print(f"peticiones: {len(ra):,} / {len(rb):,} | solo en la primera: {len(solo_a)} | "

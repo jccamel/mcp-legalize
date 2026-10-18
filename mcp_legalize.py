@@ -144,6 +144,11 @@ class ArticuloResultado(BaseModel):
     texto_truncado: Optional[bool] = None
     chars_totales: Optional[int] = None
     chars_devueltos: Optional[int] = None
+    # Dónde está la aparición devuelta: los encabezados que la contienen, como
+    # «2 kap. Barnpension». `ubicaciones` lista todas, en orden, solo cuando el
+    # número se repite; cada una se puede pasar tal cual como `capitulo`.
+    ubicacion: Optional[str] = None
+    ubicaciones: Optional[list[str]] = None
     error: Optional[str] = None
 
 class PaisNoConsultado(BaseModel):
@@ -760,6 +765,11 @@ La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
 la ley, para no tener que buscarla otra vez.
 
+Números repetidos: hay leyes que reinician la numeración en cada capítulo (los
+códigos suecos repiten `1 §`). obtener_articulo devuelve la primera aparición y,
+si hay más, las lista en `ubicaciones`. Para obtener otra, repite la llamada con
+`capitulo` igual a una de esas cadenas, tal cual.
+
 Estado del texto: cada ley trae `estado_texto`, que dice qué es su cuerpo.
 - point_in_time: la ley tal como estaba en vigor en `ultima_actualizacion`.
 - current: el último texto consolidado que publicó la fuente.
@@ -1059,8 +1069,34 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
 
     return resultado
 
+def _apariciones_indexadas(pais: str, id_ley: str, content: str, numero: str) -> list[tuple] | None:
+    """Las apariciones de `numero` que el indexador localizó, en orden, o None.
+
+    None si no hay ninguna —un documento sin encabezados de artículo, o un
+    número que solo aparece en el texto— y también si las posiciones no sirven
+    para `content`. Describen el cuerpo que leyó el indexador: si el fichero
+    cambió después, o la base de datos trae posiciones imposibles, cortar por
+    ellas entregaría otro trozo del texto. En los dos casos se localiza sobre
+    el texto que se va a servir, como antes de la spec 002.
+    """
+    con = _CONEXIONES[pais]
+    ley = con.execute("SELECT n, longitud FROM leyes WHERE id = ? COLLATE BINARY", (id_ley,)).fetchone()
+    if not ley or ley[1] != len(content):
+        return None
+    filas = con.execute(
+        "SELECT ubicacion, inicio, fin_encabezado, fin, abierto FROM articulos "
+        "WHERE ley = ? AND numero = ? ORDER BY orden", (ley[0], numero)).fetchall()
+    for _, inicio, fin_encabezado, fin, _ in filas:
+        if not all(isinstance(v, int) for v in (inicio, fin_encabezado, fin)):
+            return None
+        if not 0 <= inicio <= fin_encabezado <= fin <= len(content):
+            return None
+    return filas or None
+
+
 @mcp.tool()
-def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars: int = MAX_CONTENT_CHARS) -> ArticuloResultado | ErrorRespuesta:
+def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars: int = MAX_CONTENT_CHARS,
+                     capitulo: str = "") -> ArticuloResultado | ErrorRespuesta:
     """Extrae un artículo concreto de una ley.
 
     Dos formas de respuesta, y la diferencia entre ellas es deliberada:
@@ -1077,6 +1113,11 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     Antes los tres casos volvían anidados, así que el cliente tenía que
     inspeccionar un campo opcional para saber si había fallado algo, mientras
     que con las otras seis herramientas le bastaba el tipo.
+
+    Un número puede repetirse: los códigos suecos reinician `1 §` en cada
+    capítulo. Sin `capitulo` se devuelve la primera aparición, como siempre, y
+    `ubicaciones` dice cuáles hay; con `capitulo`, la de esa ubicación. Antes
+    solo la primera era alcanzable (spec 002, US5).
     """
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
@@ -1099,8 +1140,30 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     # Sanitizar input del LLM antes de loguear: evitar log injection via caracteres de control.
     articulo_safe_log = re.sub(r"[\x00-\x1f\x7f]", "", articulo_clean[:50])
 
+    ubicacion = ubicaciones = None
+    capitulo_clean = capitulo.strip()
     if articulo_clean:
-        localizado = _localizar_articulo(content, articulo_clean, contexto_chars)
+        apariciones = _apariciones_indexadas(found_pais, found_id, content, articulo_clean)
+        if apariciones:
+            # El servidor no interpreta nombres de capítulo: compara con las
+            # ubicaciones que él mismo devuelve, ya saneadas, porque son las
+            # únicas que el cliente ha podido ver.
+            nombres = [_sanitize_metadata(u) for u, *_ in apariciones]
+            elegida = nombres.index(capitulo_clean) if capitulo_clean in nombres else (
+                None if capitulo_clean else 0)
+            # La lista sale si el número se repite, y también si el `capitulo`
+            # pedido no corresponde: es lo que el cliente necesita para corregirlo.
+            ubicaciones = nombres if len(nombres) > 1 or elegida is None else None
+            localizado = None
+            if elegida is not None:
+                _, inicio, fin_encabezado, fin, abierto = apariciones[elegida]
+                corte = min(fin_encabezado + contexto_chars, len(content)) if abierto else fin
+                localizado = (inicio, corte, fin)
+                ubicacion = nombres[elegida] or None
+        elif capitulo_clean:
+            localizado = None
+        else:
+            localizado = _localizar_articulo(content, articulo_clean, contexto_chars)
         if localizado:
             start, end, fin_real = localizado
             fragmento_texto = content[start:end].strip()
@@ -1125,10 +1188,12 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
                 texto_truncado=truncado,
                 chars_totales=len(completo) if truncado else None,
                 chars_devueltos=len(fragmento_texto) if truncado else None,
+                ubicacion=ubicacion, ubicaciones=ubicaciones,
             )
 
     return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean,
-                             error="Artículo no encontrado", **_estado_del_texto(found_doc))
+                             error="Artículo no encontrado", ubicaciones=ubicaciones,
+                             **_estado_del_texto(found_doc))
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
