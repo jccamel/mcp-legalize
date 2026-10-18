@@ -430,15 +430,27 @@ _ENCABEZADO_RE = re.compile(r"^(#{1,6})[ \t]+(.*)$", re.MULTILINE)
 # Formas del TEXTO de un encabezado que lo identifican como el artículo `term`.
 # Medidas en `legalize-es`: `Artículo N.`, `Art. N.`, `ARTÍCULO N`, `**Artículo
 # N.**`; en `legalize-se`: `N §`.
+# Tras el número pedido no puede seguir nada que lo continúe: ni letra ni
+# dígito, ni `-` ni `*`. Con `\b`, que encaja justo ante un guion,
+# `articulo="L110"` devolvía `Article L110-1`, y un `L123-1` inexistente habría
+# devuelto `L123-1-1`. La numeración de los códigos franceses es así
+# (`L110-1`, `L123-1-1`, `R*512-9-3`), y se encontró al probar `legalize-fr` el
+# 2026-10-18: el cliente pedía un artículo y recibía otro.
+#
+# `_CUALQUIER_NUMERO` es el término que reconoce "otro artículo" para decidir
+# dónde acaba uno: además de dígitos admite los prefijos de los códigos
+# franceses (`L`, `R`, `D`, `A`, `LO`, `R*`).
+_CUALQUIER_NUMERO = r"[A-Za-z]{0,2}\*?\d[\w*-]*"
+
 _ARTICULO_EN_ENCABEZADO_TEMPLATE = [
     # Español / portugués: "Artículo 3", "ARTÍCULO 3", "Art. 3", "**Artículo 3.**"
-    r"(?i)^\**\s*(?:art[ií]culo|art\.)\s*{term}\b",
+    r"(?i)^\**\s*(?:art[ií]culo|art\.)\s*{term}(?![\w*-])",
     # Francés: "Article L135", "Article 3"
-    r"(?i)^\**\s*article\s+{term}\b",
+    r"(?i)^\**\s*article\s+{term}(?![\w*-])",
     # Sueco: "3 §" (número ANTES del §)
     r"^{term}\s*§",
     # Alemán / austriaco moderno: "§ 3" (§ ANTES del número)
-    r"^§\s*{term}\b",
+    r"^§\s*{term}(?![\w*-])",
     # Austriaco antiguo: "§. 3."
     r"^§\.\s*{term}\.",
 ]
@@ -448,10 +460,10 @@ _ARTICULO_EN_ENCABEZADO_TEMPLATE = [
 # no una remisión. Lo que solo aparece en mitad de la prosa ya no se devuelve:
 # "artículo no encontrado" es mejor respuesta que una frase presentada como ley.
 _ARTICULO_EN_LINEA_TEMPLATE = [
-    r"(?im)^[ \t]*\**[ \t]*(?:art[ií]culo|art\.)[ \t]*{term}\b",
-    r"(?im)^[ \t]*Article[ \t]+{term}\b",
+    r"(?im)^[ \t]*\**[ \t]*(?:art[ií]culo|art\.)[ \t]*{term}(?![\w*-])",
+    r"(?im)^[ \t]*Article[ \t]+{term}(?![\w*-])",
     r"(?im)^{term}[ \t]*§",
-    r"(?im)^[ \t]*§[ \t]*{term}\b",
+    r"(?im)^[ \t]*§[ \t]*{term}(?![\w*-])",
     r"(?im)^§\.[ \t]*{term}\.",
     # Número solo en su línea (último recurso)
     r"(?im)^{term}[ \t]*$",
@@ -495,7 +507,7 @@ def _localizar_articulo(content: str, articulo: str, contexto_chars: int) -> tup
     # termina este aunque esté en un nivel inferior. Hay documentos con los
     # niveles invertidos —`# Artículo 5` y después `###### Artículo 18`— y la
     # regla del nivel por sí sola hacía que el 5 se tragara el 18.
-    otro_articulo = [re.compile(tpl.format(term=r"\d+")) for tpl in _ARTICULO_EN_ENCABEZADO_TEMPLATE]
+    otro_articulo = [re.compile(tpl.format(term=_CUALQUIER_NUMERO)) for tpl in _ARTICULO_EN_ENCABEZADO_TEMPLATE]
     encabezados = list(_ENCABEZADO_RE.finditer(content))
     for i, enc in enumerate(encabezados):
         texto_enc = enc.group(2).strip()
