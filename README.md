@@ -4,6 +4,8 @@
 [![Python 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)](#quick-start)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+**English** · [Español](README.es.md)
+
 A Model Context Protocol server that gives an AI assistant read-only access to
 consolidated legislation from several jurisdictions.
 
@@ -356,7 +358,8 @@ CI runs the suite on Python 3.12, 3.13 and 3.14 on Linux, and checks that tests
 **ran**, not only that nothing failed: exactly two Windows-only tests may skip,
 and the symlink-escape test must pass. Several tests keep this page honest — the
 tool list, the configuration table, the status values and the security claims
-above are asserted against the code.
+above are asserted against the code, and the Spanish version is checked against
+this one for the same names and defaults.
 
 ## Credits and license
 
