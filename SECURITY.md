@@ -57,7 +57,7 @@ description says, that is worth reporting.
 
 ## What is already defended
 
-Read the README's [Security architecture](README.md#security-architecture)
+Read the README's [Security](README.md#security)
 section before reporting. It lists the mitigations, what is covered, and what is
 explicitly not, so you can tell a genuine gap from a documented limit.
 
