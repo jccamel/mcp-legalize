@@ -166,6 +166,7 @@ def instalar_corpus(tmp_path, monkeypatch):
     Can be called more than once to install several countries. The server's
     tables are restored after the test.
     """
+    import legalize_frontmatter
     import legalize_indice
     import legalize_tokenizer
     import mcp_legalize
@@ -190,7 +191,9 @@ def instalar_corpus(tmp_path, monkeypatch):
                 destino = raiz / ruta
                 destino.parent.mkdir(parents=True, exist_ok=True)
                 destino.write_text(cuerpo, encoding="utf-8")
-            escritor.poner_ley(doc_id, entry, cuerpo)
+            # Lo que guarda el indexador: el cuerpo sin frontmatter, que es
+            # también lo que el servidor sirve al leer el fichero.
+            escritor.poner_ley(doc_id, entry, legalize_frontmatter.cuerpo(cuerpo))
         datos_meta = {"pais_predeterminado": pais, "directorio_base": str(raiz),
                       "tokenizador": legalize_tokenizer.huella(), **(meta or {})}
         for clave, valor in datos_meta.items():

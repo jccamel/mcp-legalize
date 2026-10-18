@@ -28,13 +28,9 @@ ANEXO = "Bilaga utan rubriker. " * 40   # 880 caracteres sin ningún encabezado
 
 
 @pytest.fixture
-def ley(instalar_corpus, monkeypatch):
-    instalar_corpus("se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}})
-    cuerpo = {}
-    monkeypatch.setattr(mcp_legalize, "_read_file", lambda d, p: cuerpo["texto"])
-
+def ley(instalar_corpus):
     def articulo(texto, numero, **kw):
-        cuerpo["texto"] = texto
+        instalar_corpus("se", {"SFS-1": {"titulo": "t", "_ruta": "x.md"}}, {"SFS-1": texto})
         resultado = mcp_legalize.obtener_articulo.fn("SFS-1", numero, pais="se", **kw)
         assert isinstance(resultado, ArticuloResultado) and resultado.error is None
         return resultado

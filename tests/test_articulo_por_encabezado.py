@@ -33,16 +33,12 @@ from mcp_legalize import ArticuloResultado
 
 
 @pytest.fixture
-def ley(instalar_corpus, monkeypatch):
+def ley(instalar_corpus):
     """One law whose body each test supplies."""
-    instalar_corpus("xx", {
-        "XX-1": {"titulo": "Ley de prueba", "pais": "xx", "_ruta": "xx/1.md"},
-    })
-    cuerpo = {}
-    monkeypatch.setattr(mcp_legalize, "_read_file", lambda doc, pais: cuerpo["texto"])
-
     def articulo(texto, numero):
-        cuerpo["texto"] = texto
+        instalar_corpus("xx", {
+            "XX-1": {"titulo": "Ley de prueba", "pais": "xx", "_ruta": "xx/1.md"},
+        }, {"XX-1": texto})
         resultado = mcp_legalize.obtener_articulo.fn(id_ley="XX-1", articulo=numero, pais="xx")
         assert isinstance(resultado, ArticuloResultado)
         return resultado
