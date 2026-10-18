@@ -15,7 +15,6 @@ since that index is version-controlled, it dirtied the working tree whenever
 anyone re-indexed.
 """
 
-import json
 import subprocess
 
 import pytest
@@ -76,7 +75,8 @@ def test_a_repository_with_no_commits_reports_nothing(tmp_path):
 # ─────────────────────────── What the indexer stamps ─────────────────────────
 
 def leer_meta(indice):
-    return json.loads(indice.read_text(encoding="utf-8"))["_meta"]
+    import legalize_indice
+    return legalize_indice.como_dict(indice)["_meta"]
 
 
 def test_the_indexer_does_not_stamp_a_borrowed_commit(indexer_cli):
@@ -102,9 +102,7 @@ def test_a_commit_that_can_no_longer_be_justified_is_dropped(indexer_cli):
     (indexer_cli.repo / "a.md").write_text('---\ntitulo: "X"\n---\nCuerpo', encoding="utf-8")
     indexer_cli.correr()
 
-    datos = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-    datos["_meta"]["git_commit"] = "0" * 40
-    indexer_cli.indice.write_text(json.dumps(datos), encoding="utf-8")
+    indexer_cli.poner_meta("git_commit", "0" * 40)
 
     indexer_cli.correr("--force-all")
 
@@ -127,7 +125,7 @@ def test_a_corpus_that_is_its_own_repository_is_still_stamped(indexer_cli):
 # ─────────────────────────── Ordering in check_updates ───────────────────────
 
 def test_the_ruleset_is_checked_even_when_the_corpus_has_no_repository(
-    check_updates, tmp_path, monkeypatch, capsys,
+    check_updates, crear_indice, tmp_path, monkeypatch, capsys,
 ):
     """A corpus without a repository still has a ruleset.
 
@@ -138,14 +136,11 @@ def test_the_ruleset_is_checked_even_when_the_corpus_has_no_repository(
     indices = tmp_path / "indices"
     indices.mkdir()
     (tmp_path / "repos" / "legalize-xx").mkdir(parents=True)
-    (indices / "index_legalize-xx.json").write_text(json.dumps({
-        "_meta": {
-            "pais_predeterminado": "xx",
-            "directorio_base": "repos/legalize-xx",
-            "seguridad": {"patrones": "deadbeef0000"},
-        },
-        "documentos": {},
-    }), encoding="utf-8")
+    crear_indice(indices / "index_legalize-xx.db", {
+        "pais_predeterminado": "xx",
+        "directorio_base": "repos/legalize-xx",
+        "seguridad": {"patrones": "deadbeef0000"},
+    })
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)

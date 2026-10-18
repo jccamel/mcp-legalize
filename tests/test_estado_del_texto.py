@@ -23,7 +23,6 @@ change does not have the field; the server then answers `None` rather than
 very failure this fixes.
 """
 
-import json
 
 import pytest
 
@@ -44,7 +43,7 @@ def test_the_indexer_records_the_text_state_and_last_amendment(indexer_cli):
     escribir(indexer_cli.repo, "c.md")
 
     proc = indexer_cli.correr("--pais", "tst")
-    docs = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))["documentos"]
+    docs = indexer_cli.leer()["documentos"]
 
     assert proc.returncode == 0, proc.stderr
     assert docs["a"]["estado_texto"] == "as_enacted"
@@ -58,7 +57,7 @@ def test_an_absent_text_state_is_recorded_as_the_spec_defines_it(indexer_cli):
     escribir(indexer_cli.repo, "c.md")
 
     indexer_cli.correr("--pais", "tst")
-    docs = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))["documentos"]
+    docs = indexer_cli.leer()["documentos"]
 
     assert docs["c"]["estado_texto"] == "point_in_time"
 

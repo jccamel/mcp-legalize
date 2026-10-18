@@ -1,7 +1,7 @@
 """Shared test setup.
 
-`mcp_legalize` loads every `indices/index_*.json` into memory at import time,
-so the environment variable that points at that directory MUST be set before
+`mcp_legalize` opens every `indices/index_*.db` at import time, so the
+environment variable that points at that directory MUST be set before
 the module is first imported. pytest loads conftest before any test module,
 which makes this the only reliable place to do it.
 
@@ -74,7 +74,7 @@ def indexer_cli(tmp_path):
     """
     repo = tmp_path / "repo"
     repo.mkdir()
-    indice = tmp_path / "index.json"
+    indice = tmp_path / "index.db"
 
     # El hijo escribe su informe con la codificacion de la consola, que en
     # Windows es cp1252. Sin forzarla, los acentos llegan aquí como caracteres
@@ -90,7 +90,60 @@ def indexer_cli(tmp_path):
             env=entorno, timeout=120,
         )
 
-    return SimpleNamespace(repo=repo, indice=indice, correr=correr)
+    def leer() -> dict:
+        """The index as `{"_meta", "documentos"}`, read through the hardened path."""
+        import legalize_indice
+        return legalize_indice.como_dict(indice) if indice.exists() else {}
+
+    def poner_meta(clave: str, valor) -> None:
+        """Overwrites a meta entry, as whoever controls the file could."""
+        import json
+        import sqlite3
+        con = sqlite3.connect(indice)
+        con.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (clave, json.dumps(valor)))
+        con.commit()
+        con.close()
+
+    def texto_buscable() -> dict[str, set[str]]:
+        """`{term: ids}` of the full-text table, limited to what the tokenizer
+        calls a term. The table indexes short words too; the query side never
+        asks for them, so they are left out of what a test compares."""
+        import sqlite3
+        import legalize_tokenizer
+        con = sqlite3.connect(indice)
+        con.execute("CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, cuerpo, 'instance')")
+        salida: dict[str, set[str]] = {}
+        for termino, id_ley in con.execute(
+                "SELECT v.term, l.id FROM temp.vocab v JOIN leyes l ON l.n = v.doc"):
+            if legalize_tokenizer.tokens(termino) == {termino}:
+                salida.setdefault(termino, set()).add(id_ley)
+        con.close()
+        return salida
+
+    return SimpleNamespace(repo=repo, indice=indice, correr=correr, leer=leer,
+                           poner_meta=poner_meta, texto_buscable=texto_buscable)
+
+
+@pytest.fixture
+def crear_indice():
+    """Writes an index database with the given meta and documents.
+
+    `crear(ruta, meta, documentos=None)`, for the tests that hand
+    `check_updates.py` an index in a particular state. Each meta value is
+    written as is, so a test can leave a stamp out or set a stale one.
+    """
+    import legalize_indice
+
+    def crear(ruta, meta, documentos=None):
+        escritor = legalize_indice.Escritor(ruta)
+        for clave, valor in meta.items():
+            escritor.poner_meta(clave, valor)
+        for doc_id, entry in (documentos or {}).items():
+            escritor.poner_ley(doc_id, entry, "")
+        escritor.confirmar()
+        return ruta
+
+    return crear
 
 
 @pytest.fixture

@@ -17,7 +17,6 @@ depends on a person remembering to update it drifts out of sync. These tests
 pin what it covers, and — just as importantly — what it must ignore.
 """
 
-import json
 import re
 
 import pytest
@@ -53,7 +52,7 @@ def test_the_fingerprint_is_stable_across_processes(indexer_cli):
     (indexer_cli.repo / "a.md").write_text('---\ntitulo: "X"\n---\nCuerpo', encoding="utf-8")
     indexer_cli.correr()
 
-    grabada = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
+    grabada = indexer_cli.leer()
     assert grabada["_meta"]["seguridad"]["patrones"] == inj.huella()
 
 
@@ -112,7 +111,8 @@ def test_the_two_surfaces_have_different_fingerprints():
 # ─────────────────────────── What the indexer does with it ───────────────────
 
 def leer_seguridad(indice):
-    return json.loads(indice.read_text(encoding="utf-8"))["_meta"]["seguridad"]
+    import legalize_indice
+    return legalize_indice.como_dict(indice)["_meta"]["seguridad"]
 
 
 def test_a_fresh_index_is_stamped(indexer_cli):
@@ -137,9 +137,9 @@ def test_a_changed_ruleset_forces_a_rescan(indexer_cli):
     (indexer_cli.repo / "a.md").write_text('---\ntitulo: "X"\n---\nCuerpo', encoding="utf-8")
     indexer_cli.correr()
 
-    datos = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-    datos["_meta"]["seguridad"]["patrones"] = "deadbeef0000"
-    indexer_cli.indice.write_text(json.dumps(datos), encoding="utf-8")
+    seguridad = leer_seguridad(indexer_cli.indice)
+    seguridad["patrones"] = "deadbeef0000"
+    indexer_cli.poner_meta("seguridad", seguridad)
 
     tercera = indexer_cli.correr()
 
@@ -153,9 +153,9 @@ def test_an_index_with_no_stamp_is_rescanned(indexer_cli):
     (indexer_cli.repo / "a.md").write_text('---\ntitulo: "X"\n---\nCuerpo', encoding="utf-8")
     indexer_cli.correr()
 
-    datos = json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-    del datos["_meta"]["seguridad"]["patrones"]
-    indexer_cli.indice.write_text(json.dumps(datos), encoding="utf-8")
+    seguridad = leer_seguridad(indexer_cli.indice)
+    del seguridad["patrones"]
+    indexer_cli.poner_meta("seguridad", seguridad)
 
     tercera = indexer_cli.correr()
 
@@ -192,21 +192,18 @@ def test_the_timestamp_still_moves_with_the_stamp(indexer_cli):
 # ─────────────────────────── What check_updates reports ──────────────────────
 
 def test_check_updates_flags_an_index_audited_with_other_rules(
-    check_updates, tmp_path, monkeypatch, capsys,
+    check_updates, crear_indice, tmp_path, monkeypatch, capsys,
 ):
     indices = tmp_path / "indices"
     indices.mkdir()
     repo = tmp_path / "repos" / "legalize-xx"
     repo.mkdir(parents=True)
-    (indices / "index_legalize-xx.json").write_text(json.dumps({
-        "_meta": {
-            "pais_predeterminado": "xx",
-            "directorio_base": "repos/legalize-xx",
-            "git_commit": "abc1234",
-            "seguridad": {"patrones": "deadbeef0000"},
-        },
-        "documentos": {},
-    }), encoding="utf-8")
+    crear_indice(indices / "index_legalize-xx.db", {
+        "pais_predeterminado": "xx",
+        "directorio_base": "repos/legalize-xx",
+        "git_commit": "abc1234",
+        "seguridad": {"patrones": "deadbeef0000"},
+    })
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
@@ -227,37 +224,27 @@ def test_check_updates_flags_an_index_audited_with_other_rules(
 
 
 def test_check_updates_stays_quiet_when_the_rules_match(
-    check_updates, tmp_path, monkeypatch, capsys,
+    check_updates, crear_indice, tmp_path, monkeypatch, capsys,
 ):
     indices = tmp_path / "indices"
     indices.mkdir()
     repo = tmp_path / "repos" / "legalize-xx"
     repo.mkdir(parents=True)
-    (indices / "index_legalize-xx.json").write_text(json.dumps({
-        "_meta": {
-            "pais_predeterminado": "xx",
-            "directorio_base": "repos/legalize-xx",
-            "git_commit": "abc1234",
-            "seguridad": {"patrones": inj.huella()},
-            # El sello del tokenizador entró con #31: `check_updates` reporta
-            # TOKENS cuando falta, igual que reporta REGLAS. Este test dice
-            # "silencioso cuando las reglas coinciden", así que tiene que
-            # declarar las de las dos superficies — si no, comprobaría el
-            # silencio de una mientras la otra grita.
-            "tokenizador": tok.huella(),
-            # Y desde spec 001, sus postings: `check_updates` informa POSTINGS
-            # cuando faltan o son de otra generación. Mismo motivo que el sello
-            # de arriba: sin ellos este test comprobaría el silencio de las
-            # reglas mientras los postings gritan.
-            "generacion": "d" * 32,
-        },
-        "documentos": {},
-    }), encoding="utf-8")
-    import legalize_postings
-    legalize_postings.escribir(
-        legalize_postings.ruta_postings(indices, "legalize-xx"), {},
-        tokenizador=tok.huella(), generacion="d" * 32,
-    )
+    # Escrito por el escritor real, así que lleva el formato vigente:
+    # `check_updates` informa FORMATO si no, y este test comprobaría el
+    # silencio de las reglas mientras el formato grita (spec 002).
+    crear_indice(indices / "index_legalize-xx.db", {
+        "pais_predeterminado": "xx",
+        "directorio_base": "repos/legalize-xx",
+        "git_commit": "abc1234",
+        "seguridad": {"patrones": inj.huella()},
+        # El sello del tokenizador entró con #31: `check_updates` reporta
+        # TOKENS cuando falta, igual que reporta REGLAS. Este test dice
+        # "silencioso cuando las reglas coinciden", así que tiene que
+        # declarar las de las dos superficies — si no, comprobaría el
+        # silencio de una mientras la otra grita.
+        "tokenizador": tok.huella(),
+    })
 
     monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
     monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
@@ -271,3 +258,30 @@ def test_check_updates_stays_quiet_when_the_rules_match(
     reportado = capsys.readouterr().out
     assert "REGLAS" not in reportado
     assert "Todos los índices están al día" in reportado
+
+
+@pytest.mark.parametrize("meta", [
+    {"directorio_base": 123},
+    {"directorio_base": "repos/legalize-xx", "seguridad": [1, 2]},
+    {"directorio_base": "repos/legalize-xx", "git_commit": {"x": 1}},
+    {"pais_predeterminado": ["xx"], "directorio_base": "repos/legalize-xx"},
+], ids=["root not text", "security not an object", "commit not text", "country not text"])
+def test_check_updates_degrades_on_meta_of_the_wrong_type(
+    check_updates, crear_indice, tmp_path, monkeypatch, capsys, meta,
+):
+    """The meta comes from the index, which is untrusted (principle II): a value
+    of the wrong type costs that check, never the report."""
+    indices = tmp_path / "indices"
+    indices.mkdir()
+    (tmp_path / "repos" / "legalize-xx").mkdir(parents=True)
+    crear_indice(indices / "index_legalize-xx.db", meta)
+    monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
+    monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit", lambda _: "abc1234")
+
+    try:
+        check_updates.main()
+    except SystemExit:
+        pass
+
+    assert "XX" in capsys.readouterr().out

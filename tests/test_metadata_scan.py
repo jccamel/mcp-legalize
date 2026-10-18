@@ -21,7 +21,6 @@ neutralizes. Dropping a law because its *title* is hostile loses the law; the
 text is what matters.
 """
 
-import json
 
 import pytest
 
@@ -39,10 +38,7 @@ def escribir(directorio, nombre, *, titulo="Ley normal", cuerpo="cuerpo limpio")
 def indexar(indexer_cli):
     def correr(*extra_args):
         proc = indexer_cli.correr("--pais", "tst", *extra_args)
-        datos = (
-            json.loads(indexer_cli.indice.read_text(encoding="utf-8"))
-            if indexer_cli.indice.exists() else {}
-        )
+        datos = indexer_cli.leer()
         return datos, proc.stdout + proc.stderr
     correr.repo = indexer_cli.repo
     return correr

@@ -156,6 +156,19 @@ class Escritor:
     def quitar_meta(self, clave: str) -> None:
         self._con.execute("DELETE FROM meta WHERE clave = ?", (clave,))
 
+    def reemplazar_meta(self, meta: dict) -> None:
+        """Deja en `meta` exactamente estas claves, más el formato.
+
+        En una pasada incremental el temporal arrastra la meta del índice
+        anterior: una clave que esta pasada ya no escribe —un `git_commit` que
+        no se puede justificar, la generación del formato anterior— tiene que
+        desaparecer, no sobrevivir por omisión.
+        """
+        self._con.execute("DELETE FROM meta WHERE clave != 'formato'")
+        for clave, valor in meta.items():
+            if clave != "formato":
+                self.poner_meta(clave, valor)
+
     def poner_ley(self, id_ley: str, campos: dict, cuerpo: str) -> None:
         """Escribe una ley; `cuerpo` es el texto sin frontmatter que se sirve.
 
@@ -197,6 +210,16 @@ class Escritor:
         self._con.execute("DELETE FROM articulos WHERE ley = ?", (n,))
         self._con.execute("DELETE FROM cuerpo WHERE rowid = ?", (n,))
 
+    def contar_terminos(self) -> int:
+        """Cuántos términos distintos tiene el texto buscable, para el resumen.
+
+        Recorre el índice de texto entero: medido sobre el corpus español,
+        566.092 términos en 0,41 s, asumible una vez por pasada.
+        """
+        self._con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.vocabulario "
+                          "USING fts5vocab(main, cuerpo, 'row')")
+        return self._con.execute("SELECT count(*) FROM temp.vocabulario").fetchone()[0]
+
     def confirmar(self) -> None:
         """Cierra la transacción, compacta y sustituye el índice vigente."""
         try:
@@ -204,10 +227,17 @@ class Escritor:
             self._con.execute("INSERT INTO cuerpo(cuerpo) VALUES ('optimize')")
             self._con.execute("VACUUM")
             self._con.close()
-            os.replace(self._tmp, self.destino)
         except BaseException:
             self.descartar()
             raise
+        try:
+            os.replace(self._tmp, self.destino)
+        except OSError as exc:
+            # En Windows no se puede sustituir un fichero que otro proceso tiene
+            # abierto, y el servidor lo tiene. El índice nuevo está completo:
+            # borrarlo obligaría a repetir la pasada entera.
+            raise OSError(f"no se pudo sustituir {self.destino} ({exc}); el índice nuevo "
+                          f"queda en {self._tmp}. Para el servidor y renómbralo.") from exc
 
     def descartar(self) -> None:
         try:
