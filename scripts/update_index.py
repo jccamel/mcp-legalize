@@ -246,6 +246,13 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         "ultima_actualizacion": _get("ultima_actualizacion", "last_updated"),
         "estado":               _get("estado", "status"),
         "fuente":               _get("fuente", "source"),
+        # Qué es el cuerpo: la ley vigente en una fecha, el último texto
+        # consolidado o el acto tal como se publicó, sin sus modificaciones. La
+        # spec v0.4 exige que llegue a todo consumidor, y su ausencia significa
+        # `point_in_time` por definición de la propia spec. Se guarda ya
+        # resuelto, para que el servidor no tenga que aplicar esa regla y pueda
+        # distinguir "point_in_time" de "este índice no lo registró".
+        "estado_texto":         _get("estado_texto", "text_state", default="point_in_time"),
         "_archivo":             md_path.name,
         "_ruta":                ruta_relativa,
         "_bytes":               stat.size,
@@ -258,6 +265,9 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         ("departamento",  ("departamento", "department")),
         ("fecha_derogacion", ("fecha_derogacion", "repeal_date")),
         ("derogado_por",  ("derogado_por", "repealed_by")),
+        # Identificador del último acto que modificó un fichero `as_enacted`.
+        # Solo existe si ha habido alguna modificación (spec v0.4).
+        ("ultima_modificacion", ("ultima_modificacion", "last_amendment")),
     ]:
         val = _get(*keys)
         if val:

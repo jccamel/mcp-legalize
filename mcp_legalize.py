@@ -94,6 +94,11 @@ class DocumentoResumen(BaseModel):
     ultima_actualizacion: str
     fuente: str
     bytes: int
+    # `text_state` de la spec, literal: point_in_time, current o as_enacted.
+    # None si el índice se construyó antes de registrarlo: el servidor no lo
+    # sabe y no se lo inventa.
+    estado_texto: Optional[str] = None
+    ultima_modificacion: Optional[str] = None
 
 class LeyCompleta(BaseModel):
     id: str
@@ -105,6 +110,8 @@ class LeyCompleta(BaseModel):
     ultima_actualizacion: str
     fuente: str
     bytes: int
+    estado_texto: Optional[str] = None
+    ultima_modificacion: Optional[str] = None
     texto: Optional[str] = None
     texto_truncado: Optional[bool] = None
     chars_totales: Optional[int] = None
@@ -123,6 +130,11 @@ class ArticuloResultado(BaseModel):
     pais: str
     titulo: str
     articulo_buscado: str
+    # El estado del texto de la ley a la que pertenece el artículo. Es lo que
+    # más importa aquí: el artículo viaja sin la nota que abre el cuerpo, y un
+    # artículo `as_enacted` no incorpora las modificaciones posteriores.
+    estado_texto: Optional[str] = None
+    ultima_modificacion: Optional[str] = None
     texto: Optional[str] = None
     posicion_caracter: Optional[int] = None
     # Los mismos tres campos que `LeyCompleta`. `texto_truncado` vale False en
@@ -689,7 +701,21 @@ def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
         ultima_actualizacion=_sanitize_metadata(doc.get("ultima_actualizacion", ""), max_len=50),
         fuente=_sanitize_metadata(doc.get("fuente", ""), max_len=500),
         bytes=_bytes_de(doc),
+        **_estado_del_texto(doc),
     )
+
+def _estado_del_texto(doc: dict) -> dict:
+    """`estado_texto` y `ultima_modificacion`, saneados, o None si el índice no los trae.
+
+    Un índice anterior a que se registraran no los tiene, y entonces la
+    respuesta es None y no `point_in_time`: el indexador ya resolvió la regla
+    de la spec para la ausencia en el frontmatter; aquí la ausencia es del
+    índice, y no dice nada del texto.
+    """
+    return {
+        campo: (_sanitize_metadata(doc[campo], max_len=100) if doc.get(campo) else None)
+        for campo in ("estado_texto", "ultima_modificacion")
+    }
 
 # Caracteres prohibidos en una ruta del índice. Ninguna ruta legítima los
 # lleva, y entran por dos motivos distintos:
@@ -1000,6 +1026,14 @@ alternativas concretas — un id ambiguo devuelve ahí las leyes que coinciden.
 La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
 la ley, para no tener que buscarla otra vez.
+
+Estado del texto: cada ley trae `estado_texto`, que dice qué es su cuerpo.
+- point_in_time: la ley tal como estaba en vigor en `ultima_actualizacion`.
+- current: el último texto consolidado que publicó la fuente.
+- as_enacted: el acto tal como se publicó; sus modificaciones NO están
+  incorporadas. `ultima_modificacion` identifica la última, si la hubo. No
+  presentes un artículo `as_enacted` como el texto vigente.
+Si viene vacío, el índice es anterior a este campo y no se sabe.
 
 Idioma: las CLAVES de la respuesta son de este servidor y van en castellano;
 los VALORES se reproducen literalmente del documento fuente y nunca se traducen.
@@ -1381,12 +1415,14 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             return ArticuloResultado(
                 id=id_safe, pais=pais_safe, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=fragmento, posicion_caracter=start,
+                **_estado_del_texto(found_doc),
                 texto_truncado=truncado,
                 chars_totales=len(completo) if truncado else None,
                 chars_devueltos=len(fragmento_texto) if truncado else None,
             )
 
-    return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean, error="Artículo no encontrado")
+    return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean,
+                             error="Artículo no encontrado", **_estado_del_texto(found_doc))
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
