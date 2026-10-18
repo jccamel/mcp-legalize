@@ -116,6 +116,10 @@ Además:
   - Hay que reindexar una vez cada corpus.
   - Contar una frase muy común es más lento que una búsqueda típica (84 ms con 3.424
     resultados en ES).
+  - Indexar ES entero tarda un 34 % más que antes (201 s frente a 150), por la escritura del
+    texto buscable y la localización de los artículos. Se acepta a cambio de 7,5 veces menos
+    memoria (0,56 frente a 4,14 GB): el indexado completo solo se hace al migrar o al cambiar
+    las reglas, y las pasadas incrementales no lo notan.
 - **Reglas que se derivan:**
   - Nadie más que `legalize_indice.py` conoce el esquema.
   - Cualquier cambio de esquema sube `FORMATO`. Un índice de otro formato no se sirve y el

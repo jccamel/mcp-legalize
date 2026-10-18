@@ -454,7 +454,7 @@ Cada una pasa la CI por sí sola.
     - primera consulta: 0,2 ms en las dos;
     - memoria tras el banco completo: +578 MB frente a +182 MB (3,1×). SC-002 se cumple al cargar, pero no tras el banco: lo que crece es servir el texto de los ficheros, igual en las dos;
     - p95: texto 9,6 frente a 3,7 ms; artículos 7,2 frente a 2,7 ms;
-    - indexado completo de ES (SC-007): 150 s y 4,14 GB en `main`; 201 s y 0,56 GB en la rama. **El tiempo NO cumple SC-007 (+34 %); queda abierto.** Perfil sobre se: ~6 s de `localizar_todos` en ES y la escritura en FTS5; el plegado (~39 s) ya se pagaba antes. Una caché de escritura mayor no ayuda.
+    - indexado completo de ES (SC-007): 150 s y 4,14 GB en `main`; 201 s y 0,56 GB en la rama. El tiempo superaba el SC-007 original (+34 %); el usuario lo aceptó y el criterio se revisó en la spec (hasta +40 %). Perfil sobre se: ~6 s de `localizar_todos` en ES y la escritura en FTS5; el plegado (~39 s) ya se pagaba antes. Una caché de escritura mayor no ayuda.
     - Al medir aparecieron dos peticiones más lentas que en `main`, ya corregidas:
       - `estadisticas` y `listar_rangos` (hasta 92 ms frente a 3–9): ahora usan conteos preparados al indexar (`meta.conteos`), validados y recalculados si no sirven;
       - id inexistente sin país (8,1 frente a 5,2 ms): la subcadena recorre solo el índice de ids.

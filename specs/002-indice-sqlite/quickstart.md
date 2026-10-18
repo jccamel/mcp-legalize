@@ -33,7 +33,7 @@ Con ES, SE, FR y EU indexados:
 | Arranque hasta la primera consulta | < 50 ms |
 | Memoria residente | al menos 5 veces menor que en `main` |
 | Búsquedas por texto y artículos (p95) | < 5 ms |
-| Indexado completo de ES | ≤ 150 s y ≤ 4,15 GB |
+| Indexado completo de ES | ≤ 210 s (+40 %) y ≤ 4,15 GB |
 
 ## 4. Seguridad (SC-005)
 
