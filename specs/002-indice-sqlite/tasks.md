@@ -69,7 +69,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 ### Tests (en rojo primero)
 
-- [ ] T004 Crear `tests/test_indice_formato.py`:
+- [X] T004 Crear `tests/test_indice_formato.py`:
   - escribir con `legalize_indice` un corpus de 3 leyes (con artículos y cuerpo) y leerlo con
     `abrir()` y `como_dict()`;
   - `como_dict` devuelve `{"_meta": {...}, "documentos": {id: {...}}}` con las claves que
@@ -80,12 +80,12 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   - columnas «`NOT NULL`, con `''` como valor ausente»;
   - `id` único «`COLLATE NOCASE`»;
   - `estado_texto` resuelto a `point_in_time` si falta.
-- [ ] T005 [P] En `tests/test_indice_formato.py`, el esquema de `sqlite_master` es exactamente
+- [X] T005 [P] En `tests/test_indice_formato.py`, el esquema de `sqlite_master` es exactamente
   el SQL canónico de [data-model.md](data-model.md), y `meta.formato` es el vigente.
 
 ### Implementación
 
-- [ ] T006 Crear `legalize_indice.py`. Docstring en español con el porqué (research R1–R7).
+- [X] T006 Crear `legalize_indice.py`. Docstring en español con el porqué (research R1–R7).
   Contiene:
   - `ESQUEMA`, el SQL canónico, que es también la lista blanca;
   - `FORMATO = "1"`;
@@ -99,7 +99,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
   Solo usa la biblioteca estándar, `legalize_normalizacion` y `legalize_tokenizer`. No
   importa `pickle` ni `mcp_legalize`.
-- [ ] T007 En `legalize_indice.py`, implementar `localizar_articulos(cuerpo)`: una pasada
+- [X] T007 En `legalize_indice.py`, implementar `localizar_articulos(cuerpo)`: una pasada
   lineal por los encabezados Markdown con las plantillas del servidor
   (`_ARTICULO_EN_ENCABEZADO_TEMPLATE`, `_CUALQUIER_NUMERO`, terminación `(?![\w*-])`) y su
   regla de final (siguiente encabezado de nivel ≤ o con otro artículo). Devuelve
@@ -107,7 +107,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   nivel superior que lo contienen, unidos con « › », con « (2) » si hay empate. Las
   plantillas pasan de `mcp_legalize` a este módulo (principio III), y `mcp_legalize` las
   importa de aquí.
-- [ ] T008 Implementar `legalize_indice.abrir(ruta)`:
+- [X] T008 Implementar `legalize_indice.abrir(ruta)`:
   - URI `mode=ro`;
   - `setconfig(SQLITE_DBCONFIG_DEFENSIVE, True)`, y si falta `setconfig`, `ValueError`;
   - `PRAGMA trusted_schema=OFF`, `query_only=ON` y `cell_size_check=ON`;
@@ -116,7 +116,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
   Devuelve la conexión o lanza `ValueError` con el motivo (`ilegible`, `esquema_inesperado` o
   `formato_distinto`). Sin `enable_load_extension`.
-- [ ] T009 Ejecutar T004–T005 (en verde). Commit
+- [X] T009 Ejecutar T004–T005 (en verde). Commit
   `feat: add legalize_indice, the per-corpus database the index moves to`.
 
 ### Indexador: construcción completa (base de US1 y US4)

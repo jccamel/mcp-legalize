@@ -144,7 +144,7 @@ def test_the_ci_badge_reports_the_workflow_that_actually_runs():
 
 
 def test_the_python_badge_lists_exactly_the_versions_ci_tests():
-    """The README states 3.10 as the floor; the badge must not promise more or less than CI runs."""
+    """The README states the floor; the badge must not promise more or less than CI runs."""
     imagen, _ = next(v for alt, v in badges().items() if alt.startswith("Python"))
     from urllib.parse import unquote
 
