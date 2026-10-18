@@ -1067,10 +1067,18 @@ def _filtrar_docs(
         # descartan sin normalizar nada. Antes el de título corría primero, así
         # que una consulta que un filtro posterior iba a descartar igualmente
         # pagaba el título entero — 859 ms de más sobre el corpus español.
+        #
+        # Los límites superiores comparan la fecha recortada a la precisión del
+        # límite: "2001" es todo 2001 y "2001-06", todo junio. Sin recortar,
+        # "2001-05-01" > "2001" como cadena, y `fecha_hasta="2001"` excluía
+        # justo el año que nombra (defecto #6). Todas las fechas de los corpus
+        # son YYYY-MM-DD, así que el recorte cae siempre en una frontera de
+        # año, mes o día. Los inferiores no lo necesitan: un prefijo ya ordena
+        # antes que cualquier fecha que empiece por él.
         fp = doc.get("fecha_publicacion", "")
         if anno_clean        and not fp.startswith(anno_clean):                                     continue
         if fecha_desde_clean and fp and fp < fecha_desde_clean:                                     continue
-        if fecha_hasta_clean and fp and fp > fecha_hasta_clean:                                     continue
+        if fecha_hasta_clean and fp and fp[:len(fecha_hasta_clean)] > fecha_hasta_clean:            continue
 
         # Derogación y última actualización, a diferencia de la publicación,
         # exigen que el campo EXISTA. `fecha_derogacion` está vacía en 10.367 de
@@ -1081,12 +1089,12 @@ def _filtrar_docs(
             fd = doc.get("fecha_derogacion", "")
             if not fd:                                                                              continue
             if derogada_desde_clean and fd < derogada_desde_clean:                                  continue
-            if derogada_hasta_clean and fd > derogada_hasta_clean:                                  continue
+            if derogada_hasta_clean and fd[:len(derogada_hasta_clean)] > derogada_hasta_clean:      continue
         if actualizada_desde_clean or actualizada_hasta_clean:
             fa = doc.get("ultima_actualizacion", "")
             if not fa:                                                                              continue
             if actualizada_desde_clean and fa < actualizada_desde_clean:                            continue
-            if actualizada_hasta_clean and fa > actualizada_hasta_clean:                            continue
+            if actualizada_hasta_clean and fa[:len(actualizada_hasta_clean)] > actualizada_hasta_clean: continue
 
         if estado_norm       and estado_norm       not in _campo_normalizado(doc, "estado"):        continue
         if rango_norm        and rango_norm        not in _campo_normalizado(doc, "rango"):         continue
@@ -1156,7 +1164,9 @@ def buscar_ley(
     - anno: año exacto de publicación (e.g. "2001").
     - jurisdiccion: sub-jurisdicción (e.g. "es-an", "es-ct").
     - departamento: organismo que la dicta (e.g. "hacienda", "jefatura").
-    - fecha_desde / fecha_hasta: rango de fechas de publicación (YYYY-MM-DD o YYYY).
+    - fecha_desde / fecha_hasta: rango de fechas de publicación, inclusivo en los dos
+      extremos. Admite YYYY, YYYY-MM o YYYY-MM-DD: `fecha_hasta="2001"` incluye
+      todo 2001.
     - derogada_desde / derogada_hasta: rango de fechas de derogación.
     - actualizada_desde / actualizada_hasta: rango de últimas actualizaciones.
     - limite / offset: paginación.
