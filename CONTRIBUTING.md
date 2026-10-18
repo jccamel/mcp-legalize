@@ -17,11 +17,11 @@ pip install -r requirements.lock
 Python 3.12 or later; the floor and its reasoning are in the README.
 
 ```bash
-python -m pytest                             # 318 tests
+python -m pytest                             # the whole suite; 2 tests skip outside Windows
 python scripts/update_index.py --self-test   # the 24 injection patterns
 ```
 
-Both run in CI on 3.12 and 3.13 and must be green before a merge.
+Both run in CI on 3.12, 3.13 and 3.14 and must be green before a merge.
 
 ## The rule that matters most
 
@@ -97,9 +97,9 @@ Commit by work unit: one deliverable behaviour per commit, with its tests. Not
 `type/description`, matching the commit types: `fix/`, `docs/`, `perf/`,
 `test/`, `style/`, `ci/`, `build/`.
 
-`main` is protected. Both matrix jobs — `test (3.12)` and `test (3.13)` —
-must pass before a pull request can merge, the branch must be up to date with
-`main` first, and force-pushes and deletions are refused.
+`main` is protected. All three matrix jobs — `test (3.12)`, `test (3.13)` and
+`test (3.14)` — must pass before a pull request can merge, the branch must be up
+to date with `main` first, and force-pushes and deletions are refused.
 
 There is no required review, because a single maintainer cannot approve their own
 pull request and the rule would block every change rather than improve any. Add

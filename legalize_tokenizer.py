@@ -7,8 +7,9 @@ dejarían de coincidir sobre los mismos documentos.
 
 Es de PRESENCIA, no de frecuencia: un documento contiene un término o no lo
 contiene. Es lo que decidió #31 al elegir intersección de conjuntos frente a
-ranking, y lo que mantiene los postings en ~85 MB para el corpus español en vez
-del doble. Ordenar por relevancia es una opinión sobre qué ley importa más, y
+ranking, y lo que mantenía los postings en ~85 MB para el corpus español en vez
+del doble antes de que la spec 002 los sustituyera por una tabla de texto
+completo. Ordenar por relevancia es una opinión sobre qué ley importa más, y
 este servidor no opina — devuelve lo que dice la fuente.
 """
 
@@ -20,8 +21,9 @@ import legalize_frontmatter
 import legalize_normalizacion
 
 # Longitud mínima de un término. Por debajo quedan las palabras vacías —"de",
-# "la", "y"— que aparecen en casi todos los documentos: engordan cada lista de
-# postings y no separan nada al buscarlas.
+# "la", "y"— que aparecen en casi todos los documentos: exigirlas en `texto` no
+# separa nada. El texto buscable sí las guarda, para que cuenten dentro de una
+# `frase` (spec 002).
 _MIN_LONGITUD = 3
 
 # Qué cuenta como término. Se aplica sobre texto YA normalizado, así que los

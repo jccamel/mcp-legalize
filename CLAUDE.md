@@ -6,7 +6,7 @@ Las normas de trabajo de este repositorio están en `CONTRIBUTING.md` y mandan s
 
 ## Stack y comandos
 
-- Python ≥ 3.10, `fastmcp` + `pydantic`. Sin empaquetado: módulos sueltos en la raíz.
+- Python ≥ 3.12 (modo defensivo de SQLite, ADR 0009), `fastmcp` + `pydantic`. Sin empaquetado: módulos sueltos en la raíz.
 - Entorno: `python3 -m venv .venv && .venv/bin/pip install -r requirements.lock`
 - Tests: `.venv/bin/python -m pytest -q` (la salida llega filtrada: solo fallos y resumen; el log completo queda en `.claude/logs/`)
 - Autotest del escáner: `.venv/bin/python scripts/update_index.py --self-test`
@@ -23,7 +23,7 @@ Las normas de trabajo de este repositorio están en `CONTRIBUTING.md` y mandan s
 - `legalize_repo.py` — qué commit identifica a un corpus
 - `scripts/` — indexador (`update_index.py`) y comprobación de frescura (`check_updates.py`)
 - `tests/` — una prueba por frontera; varias comprueban la propia documentación
-- `repos/legalize-mock/`, `indices/index_legalize-mock.json` — corpus mínimo para tests; los corpus reales no se versionan
+- `repos/legalize-mock/`, `indices/index_legalize-mock.db` — corpus mínimo para tests; los corpus reales no se versionan
 - `docs/decisiones/` — decisiones de arquitectura (ADR). Índice en `docs/decisiones/README.md`
 - `specs/` — especificaciones de features grandes (spec-kit)
 - `.specify/memory/constitution.md` — principios del proyecto (spec-kit)

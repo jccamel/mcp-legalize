@@ -8,8 +8,9 @@
 # `requirements.txt` y se apunta el cliente MCP al intérprete del .venv.
 #
 # Por el mismo motivo `requires-python` tampoco vive aquí. El suelo real es
-# 3.10, lo fijan `fastmcp` y `mcp` con su propio `Requires-Python`, y está
-# documentado en el README. Repetirlo en un [project] que no se usa para
+# 3.12: lo fija el índice, que solo se abre en el modo defensivo de SQLite y
+# Python no expone ese interruptor (`Connection.setconfig`) hasta 3.12. Está
+# documentado en el README y en el ADR 0009. Repetirlo en un [project] que no se usa para
 # instalar no lo haría más cierto ni impediría nada.
 #
 # Lo que sí aporta este fichero es un único sitio para la configuración de
