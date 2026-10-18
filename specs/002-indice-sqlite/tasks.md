@@ -155,7 +155,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
 
 **Independent Test**: el banco de bases de datos manipuladas del quickstart §4.
 
-- [ ] T014 [P] [US2] Crear `tests/test_indice_seguridad.py`. Por cada caso, `abrir()` da
+- [X] T014 [P] [US2] Crear `tests/test_indice_seguridad.py`. Por cada caso, `abrir()` da
   `ValueError` con su motivo y ningún efecto, comprobado con un centinela en `tmp_path`:
   - disparador `AFTER INSERT`;
   - vista;
@@ -173,7 +173,7 @@ todas las historias. Después vienen US2 (seguridad), US1 (paridad del servidor)
   contiene sintaxis de FTS5 (`"`, `AND`, `NEAR(`, `*`, `(`, `)`, `col:valor`) en `texto`,
   `consulta` y `frase`: ninguna llamada lanza un error del motor, y el resultado equivale a
   buscar ese texto literal.
-- [ ] T017 [US2] Completar en `legalize_indice.abrir` lo que T014–T016 exijan y no estuviera
+- [X] T017 [US2] Completar en `legalize_indice.abrir` lo que T014–T016 exijan y no estuviera
   en T008. Commit `fix(security): open the index database as untrusted input`.
 
 ---
