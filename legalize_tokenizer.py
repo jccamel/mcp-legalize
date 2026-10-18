@@ -24,12 +24,15 @@ import legalize_normalizacion
 # postings y no separan nada al buscarlas.
 _MIN_LONGITUD = 3
 
-# Qué cuenta como término. Se aplica sobre texto YA normalizado, así que las
-# vocales acentuadas ya vienen plegadas y no hay que enumerarlas aquí.
+# Qué cuenta como término. Se aplica sobre texto YA normalizado, así que los
+# diacríticos ya vienen plegados y no hay que enumerarlos aquí. La `ñ` es la
+# excepción: la normalización la conserva como letra (ADR 0008), así que el
+# patrón la admite. Sin ella, `año` no producía ningún término y `España` se
+# quedaba en "espa".
 #
-# Esto explica por qué el tokenizador español funciona sin cambios sobre el
-# corpus sueco: `legalize_normalizacion.TABLA` pliega å ä ö antes de que este patrón las
-# vea.
+# Esto explica por qué el mismo tokenizador funciona sobre los corpus sueco y
+# francés: `legalize_normalizacion` pliega å ä ö, ê ô û y œ antes de que este
+# patrón las vea.
 #
 # Para el sueco ese plegado es lingüísticamente falso — å, ä y ö son letras
 # distintas del alfabeto, no vocales acentuadas — y funde palabras que no se
@@ -44,9 +47,9 @@ _MIN_LONGITUD = 3
 # rediseño y no un arreglo. Lo que decide no es una medición sino si a un
 # lector sueco le resulta inaceptable, y eso no se adivina.
 #
-# `huella` cubre la tabla, así que el día que cambie los índices viejos quedan
-# invalidados solos.
-_PATRON_TOKEN = re.compile(rf"[0-9a-z]{{{_MIN_LONGITUD},}}")
+# `huella` cubre la normalización entera, así que el día que cambie los índices
+# viejos quedan invalidados solos.
+_PATRON_TOKEN = re.compile(rf"[0-9a-zñ]{{{_MIN_LONGITUD},}}")
 
 # Presencia o frecuencia. Entra en la huella a propósito: si algún día se guarda
 # la frecuencia para poder ordenar por relevancia, los índices construidos con
@@ -106,6 +109,11 @@ def huella() -> str:
         # Ordenada para que reordenar la tabla sin cambiarla no cueste un
         # reíndice, igual que las etiquetas del escáner van ordenadas.
         repr(sorted(tabla.items())),
+        # La función y no solo su tabla: desde el ADR 0008 la mayor parte del
+        # plegado lo deciden NFD y el patrón de marcas, no la tabla.
+        inspect.getsource(legalize_normalizacion.normalizar),
+        legalize_normalizacion._MARCAS_RE.pattern,
+        legalize_normalizacion._ENYE_DESCOMPUESTA,
         # El código de `separar` y no su delimitador: la regla de qué cuenta
         # como frontmatter está en la lógica —qué cierra el bloque, qué pasa si
         # no cierra—, no solo en la cadena "---". A2 se abrió precisamente

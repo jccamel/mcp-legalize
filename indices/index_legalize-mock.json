@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generado_en": "2026-10-16T21:10:12",
+    "generado_en": "2026-10-18T14:04:54",
     "total_documentos": 1,
     "directorio_base": "repos/legalize-mock",
     "pais_predeterminado": "mock",
@@ -15,8 +15,8 @@
       "metadatos": {},
       "truncados": {}
     },
-    "tokenizador": "b6093ec5dd8f",
-    "generacion": "122151e0db8e78e58428f965c0d823e6"
+    "tokenizador": "e05b0ff0c83e",
+    "generacion": "3c6d3404a4034f3c560c95f1da86d1be"
   },
   "documentos": {
     "MOCK-1": {
