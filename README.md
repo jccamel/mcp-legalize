@@ -245,6 +245,23 @@ Conteo           { total: int, sin_consultar: list[PaisNoConsultado] }
 PaisNoConsultado { pais: str, motivo: str }
 ```
 
+### What the text is
+
+A law's body is not always the law in force. Every result carries
+`estado_texto`, the spec's `text_state`, verbatim:
+
+| Value | The body is |
+|---|---|
+| `point_in_time` | the law as in force on `ultima_actualizacion` (also what an absent `text_state` means) |
+| `current` | the latest consolidated text the source published |
+| `as_enacted` | the act as first published — **amendments are not incorporated**; `ultima_modificacion` names the latest one, if any |
+
+It matters most for `obtener_articulo`, which returns the article without the
+notice the body opens with. 52% of the Spanish corpus is `as_enacted`.
+
+An index built before this field existed answers `None` — unknown, not
+`point_in_time`. Rebuild it once with `update_index.py --repo <repo> --force-all`.
+
 ### Error contract
 
 Every tool signals failure the same way: a union with `ErrorRespuesta`, so the
