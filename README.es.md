@@ -71,7 +71,7 @@ con el mismo intérprete y el mismo script.
 | Herramienta | Devuelve |
 |---|---|
 | `listar_paises` | Las jurisdicciones indexadas, con el número de documentos y el tamaño de cada corpus |
-| `buscar_ley` | Leyes por título, país, subjurisdicción, departamento, rango, estado, año, o por un intervalo de fechas de publicación, derogación o última actualización (inclusivo: `"2001"` es todo 2001). En el cuerpo: `texto` para palabras en cualquier orden, `frase` para una frase exacta |
+| `buscar_ley` | Leyes por título, país, subjurisdicción, departamento, rango, estado, año, o por un intervalo de fechas de publicación, derogación, última actualización o fin de vigencia (inclusivo: `"2001"` es todo 2001). En el cuerpo: `texto` para palabras en cualquier orden, `frase` para una frase exacta |
 | `contar_leyes` | Cuántas leyes cumplen esos mismos filtros, y en qué países no se pudo buscar por texto |
 | `obtener_ley` | El texto completo y los metadatos de una ley. Los ids no distinguen mayúsculas |
 | `obtener_articulo` | Un artículo, localizado por su encabezado y terminado en el siguiente artículo o sección, nunca en una mención dentro del texto. Reconoce `Artículo N`, `Article N`, `N §` y `§ N` |
@@ -112,6 +112,15 @@ resultado lleva `estado_texto`, el `text_state` de la especificación, tal cual:
 Importa sobre todo en `obtener_articulo`, que devuelve el artículo sin el aviso
 con el que empieza el cuerpo. Cerca de la mitad del corpus español es
 `as_enacted`.
+
+**Cuándo deja de estar en vigor una ley.** Cada resultado lleva
+`fecha_fin_vigencia`: la fecha en que la ley dejó o dejará de estar en vigor, tal
+como la da la fuente, o `None`. Puede ser futura en una ley que sigue
+`in_force`; el servidor no la compara con hoy ni deduce de ella el estado. Que
+una ley se derogara o expirara lo dice `estado` (`repealed` o `expired`), nunca
+la fecha: una ley expirada nunca aparece con `derogada_desde`/`derogada_hasta`.
+Para filtrar, `fin_vigencia_desde`/`fin_vigencia_hasta`, combinados con `estado`
+para separar unas de otras.
 
 **Errores.** Todas las herramientas fallan igual, con
 `ErrorRespuesta { error, sugerencias }`, así que el tipo de la respuesta basta
@@ -163,7 +172,10 @@ propone la orden que lo resuelve. Ejecutarla una vez lo resuelve, sin flags:
 | `RAÍZ` | El índice sitúa su corpus fuera de `LEGALIZE_REPOS_DIR`. No se comprueba nada ahí, ni siquiera se ejecuta git |
 
 Cada pasada escribe sobre una copia del índice y la sustituye entera, así que una
-pasada interrumpida deja intacto el índice anterior. Un corpus cuyo
+pasada interrumpida deja intacto el índice anterior. Cuando una actualización
+cambia el formato del índice, `check_updates.py` informa todos los corpus como
+`FORMATO` y el servidor deja de servirlos: hay que reindexar cada uno antes de
+reiniciarlo. Un corpus cuyo
 `.legalize.yml` declare un `spec_version` más nuevo que el implementado (0.4), o
 uno que no se pueda leer, se rechaza y su índice se conserva, como exige la
 especificación de Legalize; un corpus sin ese fichero es anterior a ella y se

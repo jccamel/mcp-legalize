@@ -70,7 +70,7 @@ the same interpreter and script.
 | Tool | Returns |
 |---|---|
 | `listar_paises` | Indexed jurisdictions with document counts and corpus size |
-| `buscar_ley` | Laws by title, country, sub-jurisdiction, department, rank, status, year, or a publication, repeal or last-updated date range (inclusive; `"2001"` means all of 2001). In the body: `texto` for words in any order, `frase` for an exact phrase |
+| `buscar_ley` | Laws by title, country, sub-jurisdiction, department, rank, status, year, or a publication, repeal, last-updated or end-of-validity date range (inclusive; `"2001"` means all of 2001). In the body: `texto` for words in any order, `frase` for an exact phrase |
 | `contar_leyes` | How many laws match the same filters, and in which countries full-text search could not run |
 | `obtener_ley` | Full text and metadata of one law. Ids match regardless of case |
 | `obtener_articulo` | One article, located by its heading and ending at the next article or section — never at a mention in the text. Recognises `Artículo N`, `Article N`, `N §` and `§ N` |
@@ -109,6 +109,15 @@ carries `estado_texto`, the spec's `text_state`, verbatim:
 
 It matters most for `obtener_articulo`, which returns the article without the
 notice the body opens with. About half of the Spanish corpus is `as_enacted`.
+
+**When a law stops being in force.** Every result carries `fecha_fin_vigencia`:
+the date the law stopped or will stop being in force, as the source gives it,
+or `None`. It can lie in the future for a law still `in_force`; the server does
+not compare it with today nor deduce the status from it. Whether a law was
+repealed or expired is said by `estado` (`repealed` or `expired`), never by the
+date: an expired law is never found by `derogada_desde`/`derogada_hasta`. Filter
+with `fin_vigencia_desde`/`fin_vigencia_hasta`, and combine them with `estado`
+to keep the two apart.
 
 **Errors.** Every tool fails the same way, with
 `ErrorRespuesta { error, sugerencias }`, so the response type alone tells a
@@ -161,7 +170,9 @@ with no flags:
 | `RAÍZ` | The index places its corpus outside `LEGALIZE_REPOS_DIR`. Nothing is checked there — not even git is run |
 
 Every run writes into a copy of the index and swaps it in whole, so an
-interrupted run leaves the previous index untouched. A corpus whose
+interrupted run leaves the previous index untouched. When an update changes the
+index format, `check_updates.py` reports every corpus as `FORMATO` and the
+server stops serving them: reindex each one before restarting it. A corpus whose
 `.legalize.yml` declares a `spec_version` newer than the one implemented (0.4),
 or one that cannot be read, is refused and its index kept, as the Legalize
 spec requires; a corpus without that file predates it and is indexed. An incremental run over 1%
