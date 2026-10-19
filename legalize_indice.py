@@ -39,7 +39,9 @@ from pathlib import Path
 import legalize_articulos
 import legalize_normalizacion
 
-FORMATO = "1"
+# Sube con cada cambio de esquema: un índice de otro formato no se sirve y el
+# indexador lo reconstruye (ADR 0009). 2: `fecha_fin_vigencia` (spec 003).
+FORMATO = "2"
 
 # El esquema canónico. Es también la lista blanca de `abrir`: el SQL de cada
 # objeto propio debe coincidir carácter a carácter.
@@ -50,7 +52,8 @@ ESQUEMA = (
     "pais TEXT NOT NULL, "
     "titulo TEXT NOT NULL, rango TEXT NOT NULL, estado TEXT NOT NULL, "
     "fecha_publicacion TEXT NOT NULL, ultima_actualizacion TEXT NOT NULL, "
-    "fecha_derogacion TEXT NOT NULL, fuente TEXT NOT NULL, jurisdiccion TEXT NOT NULL, "
+    "fecha_derogacion TEXT NOT NULL, fecha_fin_vigencia TEXT NOT NULL, "
+    "fuente TEXT NOT NULL, jurisdiccion TEXT NOT NULL, "
     "departamento TEXT NOT NULL, estado_texto TEXT NOT NULL, ultima_modificacion TEXT NOT NULL, "
     "derogado_por TEXT NOT NULL, ruta TEXT NOT NULL, bytes INTEGER NOT NULL, mtime REAL NOT NULL, "
     "longitud INTEGER NOT NULL, titulo_norm TEXT NOT NULL, rango_norm TEXT NOT NULL, "
@@ -78,13 +81,15 @@ _TABLAS_FTS = frozenset({"cuerpo_data", "cuerpo_idx", "cuerpo_docsize", "cuerpo_
 _CAMPOS_TEXTO = (
     ("pais", "pais"), ("titulo", "titulo"), ("rango", "rango"), ("estado", "estado"),
     ("fecha_publicacion", "fecha_publicacion"), ("ultima_actualizacion", "ultima_actualizacion"),
-    ("fecha_derogacion", "fecha_derogacion"), ("fuente", "fuente"),
+    ("fecha_derogacion", "fecha_derogacion"), ("fecha_fin_vigencia", "fecha_fin_vigencia"),
+    ("fuente", "fuente"),
     ("jurisdiccion", "jurisdiccion"), ("departamento", "departamento"),
     ("estado_texto", "estado_texto"), ("ultima_modificacion", "ultima_modificacion"),
     ("derogado_por", "derogado_por"), ("ruta", "_ruta"),
 )
 # Los que el JSON solo llevaba si venían en el frontmatter.
-_OPCIONALES = ("jurisdiccion", "departamento", "fecha_derogacion", "derogado_por", "ultima_modificacion")
+_OPCIONALES = ("jurisdiccion", "departamento", "fecha_derogacion", "fecha_fin_vigencia",
+               "derogado_por", "ultima_modificacion")
 _NORMALIZADOS = ("titulo", "rango", "estado", "jurisdiccion", "departamento")
 
 
@@ -189,10 +194,15 @@ class Escritor:
             self._borrar(n)
         else:
             n = (self._con.execute("SELECT coalesce(max(n), 0) + 1 FROM leyes").fetchone()[0])
+        # Por nombre de columna, no por posición: insertar por posición dependía
+        # del orden de las columnas, y añadir una (spec 003) lo descolocaba.
+        fila = {"n": n, "id": id_ley, "id_casefold": id_ley.casefold(), **valores,
+                "bytes": _entero(campos.get("_bytes")), "mtime": _real(campos.get("_mtime")),
+                "longitud": len(cuerpo),
+                **{f"{c}_norm": v for c, v in zip(_NORMALIZADOS, normalizados)}}
         self._con.execute(
-            f"INSERT INTO leyes VALUES ({', '.join('?' * 25)})",
-            (n, id_ley, id_ley.casefold(), *(valores[c] for c, _ in _CAMPOS_TEXTO[:13]), valores["ruta"],
-             _entero(campos.get("_bytes")), _real(campos.get("_mtime")), len(cuerpo), *normalizados),
+            f"INSERT INTO leyes ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
+            tuple(fila.values()),
         )
         self._con.executemany(
             "INSERT INTO articulos VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

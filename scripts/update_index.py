@@ -11,9 +11,10 @@ Soporta subcarpetas arbitrarias usando recursividad (`rglob`).
 """
 
 import argparse
+import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
@@ -201,6 +202,32 @@ def _scan_metadatos(entry: dict) -> list[str]:
             hallazgos.append(f"{campo}: {h.label}")
     return hallazgos
 
+_FECHA_RE = re.compile(r"(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?")
+
+
+def _fecha_valida(valor) -> str:
+    """`valor` si es una fecha real con forma AAAA, AAAA-MM o AAAA-MM-DD; si no, "".
+
+    Los filtros comparan fechas como cadenas recortadas a la precisión del
+    límite (defecto #6), así que un valor que no es una fecha daría resultados
+    sin sentido en lugar de ninguno. Medido el 2026-10-19: las 2.267 fechas de
+    `end_of_validity` del corpus europeo tienen forma AAAA-MM-DD, así que esto
+    no descarta ninguna real; existe para el valor que el corpus no debería
+    traer. Un valor descartado cuesta ese campo, nunca la ley.
+    """
+    if not isinstance(valor, str):
+        return ""
+    m = _FECHA_RE.fullmatch(valor.strip())
+    if not m:
+        return ""
+    anno, mes, dia = m.groups()
+    try:
+        date(int(anno), int(mes or 1), int(dia or 1))
+    except ValueError:
+        return ""
+    return valor.strip()
+
+
 def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding]]:
     """Construye una entrada de índice para un documento .md.
 
@@ -269,6 +296,22 @@ def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: 
         val = _get(*keys)
         if val:
             entry[field] = val
+
+    # Fin de vigencia: la fecha en que la ley dejó o dejará de estar en vigor,
+    # por cualquier motivo. Es una extensión del corpus europeo, que no trae
+    # `repeal_date`: medido el 2026-10-19, la llevan 2.267 de sus 18.607 leyes
+    # (1.061 derogadas, 670 expiradas y 536 en vigor, casi todas con fecha
+    # futura). Se guarda tal cual, pasada o futura; el estado no se deduce de
+    # ella (spec 003, Q3).
+    fin_vigencia = _fecha_valida(_get("fecha_fin_vigencia", "end_of_validity"))
+    if fin_vigencia:
+        entry["fecha_fin_vigencia"] = fin_vigencia
+        # Una ley derogada sin `repeal_date` toma esa fecha como fecha de
+        # derogación, para que los filtros de derogación encuentren las
+        # derogadas europeas (Q1). Solo las derogadas: una expirada no se
+        # derogó, y su fecha nunca se presenta como derogación (FR-003).
+        if entry["estado"] == "repealed" and not entry.get("fecha_derogacion"):
+            entry["fecha_derogacion"] = fin_vigencia
     # Truncar antes de escanear: el escaneo cuesta en proporción al texto y no
     # tiene sentido pagarlo sobre una franja que no va a entrar en el índice.
     truncados = _truncar_metadatos(entry)

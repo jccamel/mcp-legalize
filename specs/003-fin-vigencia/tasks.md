@@ -31,9 +31,9 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 ## Phase 1: Setup
 
-- [ ] T001 Línea base: `.venv/bin/python -m pytest -rs` y `scripts/update_index.py
+- [X] T001 Línea base: `.venv/bin/python -m pytest -rs` y `scripts/update_index.py
   --self-test` en la rama; anotar el número de tests en Notes.
-- [ ] T002 Referencia de paridad nueva, **antes de tocar código**: con los índices actuales
+- [X] T002 Referencia de paridad nueva, **antes de tocar código**: con los índices actuales
   (formato 1, reglas `546d466524e0`), ejecutar
   `specs/002-indice-sqlite/paridad/banco.py . specs/003-fin-vigencia/paridad/referencia.json`.
   Hace falta porque la referencia de la spec 002 es anterior a la #58, que añadió a EU la ley
@@ -49,7 +49,7 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 ### Tests
 
-- [ ] T003 [P] Crear `tests/test_fin_vigencia_indexador.py`, a través del indexador
+- [X] T003 [P] Crear `tests/test_fin_vigencia_indexador.py`, a través del indexador
   (`indexer_cli`), con un corpus de una ley por caso del data-model:
   - `expired` con `end_of_validity` → `fecha_fin_vigencia` con la fecha y
     `fecha_derogacion` vacía (FR-003);
@@ -66,16 +66,16 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 ### Implementación
 
-- [ ] T004 En `legalize_indice.py`: columna `fecha_fin_vigencia TEXT NOT NULL` en `leyes`,
+- [X] T004 En `legalize_indice.py`: columna `fecha_fin_vigencia TEXT NOT NULL` en `leyes`,
   campo en `_CAMPOS_TEXTO` y en `_OPCIONALES` (vacía = ausente en `como_dict` y
   `fila_a_doc`), `FORMATO = "2"`. `Escritor.poner_ley` pasa a insertar por nombre de columna,
   sin depender del orden (`_CAMPOS_TEXTO[:13]`, R3).
-- [ ] T005 En `scripts/update_index.py`, en `_build_entry`: leer `end_of_validity` (y
+- [X] T005 En `scripts/update_index.py`, en `_build_entry`: leer `end_of_validity` (y
   `fecha_fin_vigencia`, por simetría con las demás claves) como campo opcional, validado por
   una función nueva que acepta `AAAA`, `AAAA-MM` y `AAAA-MM-DD` reales (R2). Después, la regla
   de Q1: si `estado` es `repealed`, no hay `fecha_derogacion` y sí `fecha_fin_vigencia`,
   `fecha_derogacion` toma esa fecha. Comentarios con las cifras medidas de EU.
-- [ ] T006 Regenerar `indices/index_legalize-mock.db` con el formato 2 (si no, la suite y
+- [X] T006 Regenerar `indices/index_legalize-mock.db` con el formato 2 (si no, la suite y
   `check_updates` lo dan por `FORMATO`). Suite en verde. Commit
   `feat(index): read end_of_validity, and use it as the repeal date of repealed laws`.
 
@@ -196,7 +196,7 @@ Una sola PR; cada commit pasa la suite.
 
 ## Notes
 
-- Línea base (T001): _pendiente_
-- Referencia de paridad (T002): _pendiente_
+- Línea base (T001, 2026-10-19, rama en 1ee3893): 684 passed, 2 skipped; self-test OK (huella 546d466524e0); `check_updates` con todo al día.
+- Referencia de paridad (T002): 1.178 peticiones, generada con el código en 1ee3893 y los índices de formato 1. `specs/003-fin-vigencia/paridad/referencia.json` (ignorada por git), sha256 4983973aafbbe78d…
 - Paridad tras la feature (T016): _pendiente_
 - Mediciones (T017): _pendiente_
