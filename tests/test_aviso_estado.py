@@ -96,3 +96,42 @@ def test_the_instructions_explain_the_warning():
     assert "aviso_estado" in instrucciones
     parrafo = instrucciones[instrucciones.index("aviso_estado"):][:600]
     assert "servidor" in parrafo and "vigente" in parrafo
+
+
+# ───────────────────────────── the filter (US2) ──────────────────────────────
+
+CON_AVISO = {i for i, (_, _, aviso) in CASOS.items() if aviso}
+
+
+def ids(**filtros):
+    return {r.id for r in mcp_legalize.buscar_ley.fn(pais="uk", limite=50, **filtros)}
+
+
+def test_the_repealed_filter_finds_the_laws_repealed_by_their_title(corpus):
+    """Revoked ones too: it is the source's word for secondary legislation (FR-006)."""
+    assert ids(estado="repealed") == CON_AVISO | {"DER"}
+
+
+def test_the_in_force_filter_leaves_them_out(corpus):
+    """Q2: a law shows under one status filter or the other, never both."""
+    assert ids(estado="in_force") == {"SIN", "MED"}
+
+
+def test_the_date_in_the_mark_is_not_a_repeal_date(corpus):
+    """Q1: `(Repealed 25.10.1991)` does not reach the repeal-date filters."""
+    assert ids(derogada_desde="1900") == set()
+
+
+@pytest.mark.parametrize("estado", ["repealed", "in_force", ""])
+def test_counting_and_searching_agree(corpus, estado):
+    total = mcp_legalize.contar_leyes.fn(pais="uk", estado=estado).total
+
+    assert total == len(ids(estado=estado))
+
+
+def test_statistics_keep_the_literal_status_and_count_the_warnings(corpus):
+    """FR-009: the mismatch with contar_leyes is visible, not silent."""
+    resultado = mcp_legalize.estadisticas.fn(pais="uk")
+
+    assert resultado.estados == {"in_force": 6, "desconocido": 1, "repealed": 1}
+    assert resultado.avisos_estado == len(CON_AVISO)

@@ -118,7 +118,7 @@ respuestas), US2 (el filtro por estado y `estadisticas`) y US3 (el operador rein
 
 **Independent Test**: escenarios 1–3 de la historia 2.
 
-- [ ] T011 [P] [US2] En `tests/test_aviso_estado.py`, con corpus construido **por el
+- [X] T011 [P] [US2] En `tests/test_aviso_estado.py`, con corpus construido **por el
   indexador** (la regla del filtro vive en el índice): `estado="repealed"` devuelve las leyes
   con aviso, incluida la `(Revoked)`, y la `repealed` propia; `estado="in_force"` no devuelve
   ninguna con aviso; `derogada_desde="1900"` no devuelve ninguna con aviso (Q1);
@@ -126,11 +126,11 @@ respuestas), US2 (el filtro por estado y `estadisticas`) y US3 (el operador rein
   `estados` literal y `avisos_estado` igual al número de leyes con aviso. Debe fallar en
   `avisos_estado` (no existe); si lo demás ya pasa por T006, comprobarlo quitando
   temporalmente `estado_filtrable` de `poner_ley` y viéndolo fallar, y anotarlo en el commit.
-- [ ] T012 [US2] En `legalize_indice.py`: `contar` añade `"avisos_estado"`, un entero: filas
+- [X] T012 [US2] En `legalize_indice.py`: `contar` añade `"avisos_estado"`, un entero: filas
   con `estado_norm = ?` (`normalizar("repealed")`) y `estado` en
   `legalize_estado.ESTADOS_CONTRADECIBLES`, como parámetros enlazados; `conteos_validos` exige
   un entero ≥ 0 no booleano (si falta, el servidor recalcula con `contar`, como hoy).
-- [ ] T013 [US2] En `mcp_legalize.py`: `avisos_estado: int` en `Estadisticas`, sumado por
+- [X] T013 [US2] En `mcp_legalize.py`: `avisos_estado: int` en `Estadisticas`, sumado por
   país; docstring de `buscar_ley`/`contar_leyes` (filtro `estado`): `repealed` incluye las
   leyes con `aviso_estado`. Commit `feat: find laws repealed by their title with the repealed filter`.
 
@@ -201,3 +201,4 @@ Una sola PR; cada commit pasa la suite.
 - Antes del cambio (T003), sobre el índice UK: `estado="repealed"` da 0 en `buscar_ley` y en `contar_leyes`, y `in_force` da 86.671. p95 con 200 repeticiones: 8,76 ms en `buscar_ley` y 8,80 ms en `contar_leyes`.
 - T004 visto fallar: 5 de 9 casos (REP, REV, FEC, PAR, VAC), porque `estado_norm` guardaba el estado plegado (`in_force` o vacío). Con T005–T006 pasan los 10; suite 789 passed, 2 skipped.
 - T008 visto fallar: los 12 casos de las tres herramientas, por `AttributeError` (el campo no existía); el de las instrucciones, porque no nombraban `aviso_estado`. Con T009–T010 pasan; suite 802 passed, 2 skipped.
+- T011 visto fallar: `avisos_estado` no existía en `Estadisticas`. Los filtros ya pasaban por T006; quitando `estado_filtrable` de `poner_ley` fallaron `repealed` e `in_force`, y se restauró. Suite tras T013: 809 passed, 2 skipped.
