@@ -85,3 +85,93 @@ def test_a_year_or_a_month_is_a_date_at_its_own_precision(indexado, id_ley, fech
 def test_a_value_that_is_not_a_real_date_is_dropped_and_the_law_kept(indexado, i):
     """FR-001: `pronto`, 30 February, day-first, a list, month 13."""
     assert campos(indexado, f"MALA{i}") == (None, None, "repealed")
+
+
+# ─────────── Q1 through the tools: the repeal filters (US3) ────────────────
+
+@pytest.fixture
+def servido(indexado, indexer_cli, monkeypatch):
+    """The index the real indexer wrote, registered in the server."""
+    import mcp_legalize
+
+    for tabla in ("_CONEXIONES", "_META_POR_PAIS", "_INDEX_FILE_POR_PAIS",
+                  "_RAIZ_POR_PAIS", "_TEXTO_NO_DISPONIBLE"):
+        monkeypatch.setattr(mcp_legalize, tabla, {})
+    monkeypatch.setattr(mcp_legalize, "REPOS_DIR", indexer_cli.repo.parent)
+    mcp_legalize._registrar_indice(indexer_cli.indice, indexer_cli.repo.parent.resolve())
+    return mcp_legalize
+
+
+def derogadas(m, **filtros):
+    resultado = m.buscar_ley.fn(pais="eu", limite=100, **filtros)
+    assert m.contar_leyes.fn(pais="eu", **filtros).total == len(resultado)
+    return sorted(r.id for r in resultado)
+
+
+def test_a_european_repealed_law_is_found_by_the_repeal_filters(servido):
+    """Q1: before, derogada_desde found no European law at all."""
+    assert "DER" in derogadas(servido, derogada_desde="2017", derogada_hasta="2017")
+
+
+def test_an_expired_law_is_never_found_by_the_repeal_filters(servido):
+    """FR-003, through the tools: an expiry is not a repeal."""
+    encontradas = derogadas(servido, derogada_desde="1900")
+
+    assert "EXP" not in encontradas and "ANN" not in encontradas and "MES" not in encontradas
+    assert encontradas == ["AMB", "DER"]
+
+
+# ──────────────── the operator rebuilds once (US4, FR-012) ──────────────────
+
+def test_an_index_of_the_previous_format_is_reported_and_rebuilt_once(
+    check_updates, tmp_path, monkeypatch, capsys,
+):
+    """The schema change raises FORMATO. An index written before is reported,
+    and the remedy check_updates proposes, run once with no flags, leaves it
+    current and carrying the new date."""
+    import json
+    import sqlite3
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import legalize_indice as li
+
+    repo = tmp_path / "repos" / "legalize-xx"
+    escribir(repo, "a.md", identifier="EXP", status="expired", end_of_validity="2005-05-20")
+    indices = tmp_path / "indices"
+    indices.mkdir()
+    indice = indices / "index_legalize-xx.db"
+
+    # El esquema del formato 1: el de hoy sin la columna de la spec 003.
+    con = sqlite3.connect(indice)
+    for sentencia in li.ESQUEMA:
+        con.execute(sentencia.replace("fecha_fin_vigencia TEXT NOT NULL, ", ""))
+    for clave, valor in {"formato": "1", "directorio_base": str(repo),
+                         "pais_predeterminado": "xx"}.items():
+        con.execute("INSERT INTO meta VALUES (?, ?)", (clave, json.dumps(valor)))
+    con.commit()
+    con.close()
+
+    monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
+    monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit", lambda _: "")
+
+    def comprobar():
+        try:
+            check_updates.main()
+        except SystemExit:
+            pass
+        return capsys.readouterr().out
+
+    assert "FORMATO" in comprobar()
+
+    proc = subprocess.run(
+        [sys.executable, str(Path(check_updates.__file__).parent / "update_index.py"),
+         "--repo", str(repo), "--index", str(indice)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    assert "FORMATO" not in comprobar()
+    assert li.como_dict(indice)["documentos"]["EXP"]["fecha_fin_vigencia"] == "2005-05-20"
