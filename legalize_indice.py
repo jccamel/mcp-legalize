@@ -37,11 +37,17 @@ import urllib.parse
 from pathlib import Path
 
 import legalize_articulos
+import legalize_estado
 import legalize_normalizacion
 
 # Sube con cada cambio de esquema: un índice de otro formato no se sirve y el
 # indexador lo reconstruye (ADR 0009). 2: `fecha_fin_vigencia` (spec 003).
-FORMATO = "2"
+# 3: `estado_norm` archiva como `repealed` las leyes cuyo título contradice al
+# estado (spec 004). Lleva la huella de esa regla porque decide qué devuelve el
+# filtro de estado: un índice archivado con otra daría resultados que no
+# corresponden, sin avisar, y así se reconstruye sin que nadie tenga que
+# acordarse de subir el número (principio VII).
+FORMATO = "3." + legalize_estado.huella()
 
 # El esquema canónico. Es también la lista blanca de `abrir`: el SQL de cada
 # objeto propio debe coincidir carácter a carácter.
@@ -187,7 +193,12 @@ class Escritor:
         valores = {col: _texto(campos.get(clave)) for col, clave in _CAMPOS_TEXTO}
         if not valores["estado_texto"]:
             valores["estado_texto"] = "point_in_time"
-        normalizados = [legalize_normalizacion.normalizar(valores[c]) for c in _NORMALIZADOS]
+        # El filtro de estado lee `estado_norm`, nunca `estado`: una ley cuyo
+        # título dice que se derogó se archiva como `repealed` sin tocar el
+        # valor que se sirve, que es el de la fuente (ADR 0001, ADR 0012).
+        filtrables = {**valores, "estado": legalize_estado.estado_filtrable(
+            valores["estado"], valores["titulo"])}
+        normalizados = [legalize_normalizacion.normalizar(filtrables[c]) for c in _NORMALIZADOS]
         fila = self._con.execute("SELECT n FROM leyes WHERE id = ? COLLATE BINARY", (id_ley,)).fetchone()
         if fila:
             n = fila[0]
