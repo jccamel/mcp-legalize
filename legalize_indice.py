@@ -474,7 +474,8 @@ def frase_fts(frase: str) -> str | None:
 
 def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion="", departamento="",
                      fecha_desde="", fecha_hasta="", derogada_desde="", derogada_hasta="",
-                     actualizada_desde="", actualizada_hasta="", match=None) -> tuple[str, list]:
+                     actualizada_desde="", actualizada_hasta="", fin_vigencia_desde="",
+                     fin_vigencia_hasta="", match=None) -> tuple[str, list]:
     """`(where, parametros)` para `buscar_ley` y `contar_leyes`: un solo sitio (principio III).
 
     Reproduce la semántica de los filtros que había en memoria:
@@ -483,7 +484,7 @@ def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion=
       departamento. `instr` y no `LIKE`, que añadiría comodines que escapar.
     - `anno` es un prefijo de la fecha de publicación.
     - Las fechas de publicación dejan pasar los documentos sin fecha; las de
-      derogación y de actualización exigen que exista.
+      derogación, de actualización y de fin de vigencia exigen que exista.
     - Los límites superiores comparan la fecha recortada a la precisión del
       límite: "2001" es todo 2001 (defecto #6).
     - `match`, si llega, es una expresión de `terminos_fts` sobre el cuerpo.
@@ -519,6 +520,7 @@ def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion=
     rango_fechas("fecha_publicacion", fecha_desde, fecha_hasta, exige=False)
     rango_fechas("fecha_derogacion", derogada_desde, derogada_hasta, exige=True)
     rango_fechas("ultima_actualizacion", actualizada_desde, actualizada_hasta, exige=True)
+    rango_fechas("fecha_fin_vigencia", fin_vigencia_desde, fin_vigencia_hasta, exige=True)
     subcadena("estado_norm", estado)
     subcadena("rango_norm", rango)
     subcadena("jurisdiccion_norm", jurisdiccion)

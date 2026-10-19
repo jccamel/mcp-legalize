@@ -77,3 +77,52 @@ def test_a_hostile_value_in_the_index_reaches_the_model_sanitised(corpus):
     fin = mcp_legalize.obtener_ley.fn("SIN", pais="eu").fecha_fin_vigencia
 
     assert "IGNORE ALL PREVIOUS" not in fin.upper() and "<b>" not in fin
+
+
+# ──────────────────────────── the filters (US2) ──────────────────────────────
+
+@pytest.fixture
+def fechas(instalar_corpus):
+    instalar_corpus("eu", {
+        "E26": documento("expired", "2026-03-01"),
+        "E27": documento("expired", "2027-12-31"),
+        "R27": documento("repealed", "2027-06-15", derogacion="2027-06-15"),
+        "F28": documento("in_force", "2028-01-01"),
+        "SIN": documento("in_force"),
+    })
+
+
+def filtrar(**filtros):
+    resultado = mcp_legalize.buscar_ley.fn(pais="eu", limite=100, **filtros)
+    assert isinstance(resultado, list), resultado
+    assert mcp_legalize.contar_leyes.fn(pais="eu", **filtros).total == len(resultado), \
+        "contar_leyes describe otra consulta"
+    return sorted(r.id for r in resultado)
+
+
+@pytest.mark.parametrize("filtros,esperado", [
+    ({"fin_vigencia_hasta": "2027"}, ["E26", "E27", "R27"]),
+    ({"fin_vigencia_desde": "2027"}, ["E27", "F28", "R27"]),
+    ({"fin_vigencia_desde": "2027", "fin_vigencia_hasta": "2027"}, ["E27", "R27"]),
+    ({"fin_vigencia_desde": "2027-06", "fin_vigencia_hasta": "2027-06"}, ["R27"]),
+    ({"fin_vigencia_hasta": "2027-12-31"}, ["E26", "E27", "R27"]),
+], ids=["until a year", "from a year", "one year", "one month", "until a day"])
+def test_a_bound_names_the_whole_period_inclusively(fechas, filtros, esperado):
+    assert filtrar(**filtros) == esperado
+
+
+def test_expired_and_repealed_are_told_apart_with_estado(fechas):
+    rango = {"fin_vigencia_desde": "2027", "fin_vigencia_hasta": "2027"}
+
+    assert filtrar(estado="expired", **rango) == ["E27"]
+    assert filtrar(estado="repealed", **rango) == ["R27"]
+
+
+def test_a_law_without_an_end_never_meets_the_filter(fechas):
+    assert "SIN" not in filtrar(fin_vigencia_desde="1900")
+
+
+def test_client_text_in_the_filter_is_a_value_not_sql(fechas):
+    """Compared as the text it is: `'` sorts before `-`, so every 2027 date is
+    above it. Read as SQL, `OR 1=1` would also return SIN, which has no date."""
+    assert filtrar(fin_vigencia_desde="2027' OR 1=1 --") == ["E27", "F28", "R27"]

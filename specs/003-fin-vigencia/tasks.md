@@ -109,12 +109,12 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 **Independent Test**: escenarios 1–3 de la historia 2.
 
-- [ ] T010 [P] [US2] En `tests/test_fin_vigencia.py`: `fin_vigencia_desde`/`hasta` con fechas
+- [X] T010 [P] [US2] En `tests/test_fin_vigencia.py`: `fin_vigencia_desde`/`hasta` con fechas
   en 2026, 2027 y 2028; `hasta="2027"` incluye todo 2027; combinado con `estado="expired"`;
   una ley sin fecha nunca cumple el filtro; `contar_leyes` coincide con `buscar_ley` en cada
   caso; un valor del cliente con sintaxis SQL (`"2027' OR 1=1 --"`) no devuelve nada inesperado.
   Debe fallar: los parámetros no existen.
-- [ ] T011 [US2] En `legalize_indice.construir_filtro`: `fin_vigencia_desde`/`hasta` con
+- [X] T011 [US2] En `legalize_indice.construir_filtro`: `fin_vigencia_desde`/`hasta` con
   `rango_fechas("fecha_fin_vigencia", ..., exige=True)`. En `mcp_legalize.py`: los dos
   parámetros al final de `buscar_ley` y `contar_leyes`, pasados por `_consultas`; docstrings.
   Commit `feat: filter laws by the date they stop being in force`.
