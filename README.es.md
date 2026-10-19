@@ -123,6 +123,15 @@ la fecha: una ley expirada nunca aparece con `derogada_desde`/`derogada_hasta`.
 Para filtrar, `fin_vigencia_desde`/`fin_vigencia_hasta`, combinados con `estado`
 para separar unas de otras.
 
+**Cuando el título contradice al estado.** El corpus del Reino Unido trae todas
+las leyes `in_force` y marca al final del título las que ya no lo están:
+`Licensing Act 1964 (repealed)`, `… (revoked)`, `… (Repealed 25.10.1991)` (594 de
+86.671 leyes). `estado` sigue siendo el de la fuente; una ley así lleva además
+`aviso_estado`, un campo del servidor, con la marca tal cual, fecha y excepciones
+incluidas, sin interpretar. El filtro `estado` archiva estas leyes como
+`repealed`, no como `in_force`, y `estadisticas` las cuenta aparte en
+`avisos_estado`. La fecha de la marca no es una fecha de derogación.
+
 **Errores.** Todas las herramientas fallan igual, con
 `ErrorRespuesta { error, sugerencias }`, así que el tipo de la respuesta basta
 para saber si la llamada funcionó; un id ambiguo devuelve los candidatos en

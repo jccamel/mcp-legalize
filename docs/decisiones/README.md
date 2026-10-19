@@ -21,3 +21,4 @@ Registro de las decisiones que condicionan el proyecto. Cada decisión vive en s
 | 0009 | [El índice de cada corpus es una base de datos SQLite, abierta como entrada no confiable](0009-indice-en-base-de-datos.md) | Aceptada | 2026-10-18 |
 | 0010 | [Griego y cirílico como términos, conservando й, ї y ў](0010-griego-y-cirilico.md) | Aceptada | 2026-10-19 |
 | 0011 | [Una sección numerada solo con su número es un artículo, si la ley no tiene otros](0011-secciones-numeradas.md) | Aceptada | 2026-10-19 |
+| 0012 | [Cuando el título contradice al estado, un aviso del servidor; el estado no se toca](0012-aviso-de-estado.md) | Aceptada | 2026-10-19 |

@@ -21,6 +21,7 @@ Las normas de trabajo de este repositorio están en `CONTRIBUTING.md` y mandan s
 - `legalize_frontmatter.py` — única regla de dónde acaba el frontmatter
 - `legalize_tokenizer.py` — única regla de qué es un término (búsqueda a texto completo)
 - `legalize_repo.py` — qué commit identifica a un corpus
+- `legalize_estado.py` — única regla de cuándo el título de una ley contradice a su estado
 - `scripts/` — indexador (`update_index.py`) y comprobación de frescura (`check_updates.py`)
 - `tests/` — una prueba por frontera; varias comprueban la propia documentación
 - `repos/legalize-mock/`, `indices/index_legalize-mock.db` — corpus mínimo para tests; los corpus reales no se versionan

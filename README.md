@@ -120,6 +120,15 @@ date: an expired law is never found by `derogada_desde`/`derogada_hasta`. Filter
 with `fin_vigencia_desde`/`fin_vigencia_hasta`, and combine them with `estado`
 to keep the two apart.
 
+**When the title contradicts the status.** The UK corpus gives every law
+`in_force` and marks the ones no longer in force at the end of the title:
+`Licensing Act 1964 (repealed)`, `… (revoked)`, `… (Repealed 25.10.1991)` (594 of
+86,671 laws). `estado` stays the source's value; such a law also carries
+`aviso_estado`, the server's own field, with the mark as it is, date and
+exceptions included, never interpreted. The `estado` filter files these laws
+under `repealed`, not `in_force`, and `estadisticas` counts them apart in
+`avisos_estado`. The date in the mark is not a repeal date.
+
 **Errors.** Every tool fails the same way, with
 `ErrorRespuesta { error, sugerencias }`, so the response type alone tells a
 client whether the call succeeded; an ambiguous id returns the candidates in
