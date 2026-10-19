@@ -58,6 +58,9 @@ BODY_VOCABULARY = [
     ("se.ignorera_instruktioner", inj.SEVERITY_BLOCK),
     ("se.glom_tidigare", inj.SEVERITY_BLOCK),
     ("generic.role_prefix", inj.SEVERITY_BLOCK),
+    # Añadido el 2026-10-19: un "User:" suelto en un reglamento europeo
+    # ponía la ley en cuarentena. Los índices se reescanean (huella nueva).
+    ("generic.role_label", inj.SEVERITY_WARN),
     ("generic.chatml_token", inj.SEVERITY_BLOCK),
     ("tech.script_tag", inj.SEVERITY_BLOCK),
     ("tech.untrusted_escape", inj.SEVERITY_BLOCK),
