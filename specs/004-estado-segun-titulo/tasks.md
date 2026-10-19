@@ -158,12 +158,12 @@ respuestas), US2 (el filtro por estado y `estadisticas`) y US3 (el operador rein
 - [X] T017 [P] `CLAUDE.md`, «Estructura»: `legalize_estado.py — única regla de cuándo el
   título contradice al estado`. `specs/002-indice-sqlite/paridad/banco.py`: `aviso_estado` y
   `avisos_estado` en `CAMPOS_NUEVOS`.
-- [ ] T018 Reindexar es, eu, fr, se y uk (`check_updates` debe pedirlo como `FORMATO`).
+- [X] T018 Reindexar es, eu, fr, se y uk (`check_updates` debe pedirlo como `FORMATO`).
   Banco y comparación con `specs/004-estado-segun-titulo/paridad/referencia.json`: 0
   diferencias fuera de los campos nuevos. Anotar tiempos y resultado en Notes.
-- [ ] T019 Quickstart §4–§5 sobre los índices reales (SC-001, SC-002) y R7 contra T003.
+- [X] T019 Quickstart §4–§5 sobre los índices reales (SC-001, SC-002) y R7 contra T003.
   Anotar en Notes.
-- [ ] T020 `pytest -rs` y `--self-test`. Commit final
+- [X] T020 `pytest -rs` y `--self-test`. Commit final
   `docs: close spec 004 - title warnings in the READMEs, ADR 0012, parity and measurements`.
   Recordar `/security-review` al usuario.
 
@@ -203,3 +203,6 @@ Una sola PR; cada commit pasa la suite.
 - T008 visto fallar: los 12 casos de las tres herramientas, por `AttributeError` (el campo no existía); el de las instrucciones, porque no nombraban `aviso_estado`. Con T009–T010 pasan; suite 802 passed, 2 skipped.
 - T011 visto fallar: `avisos_estado` no existía en `Estadisticas`. Los filtros ya pasaban por T006; quitando `estado_filtrable` de `poner_ley` fallaron `repealed` e `in_force`, y se restauró. Suite tras T013: 809 passed, 2 skipped.
 - T014 pasaba a la primera (el mecanismo de `FORMATO` es el de la spec 002). Visto fallar fijando `FORMATO = "2"` a mano (el índice viejo salía «al día») y quitando el patrón de `huella()`. En ese segundo caso, el primer intento no falló porque el regex de prueba tenía otros flags; ahora usa los mismos.
+- T018: los cinco índices se reindexaron con `FORMATO` `3.176804eab683` (es, 530 MB; uk, 726 MB). El banco (1.178 peticiones) contra la referencia de T002 da una sola diferencia, la esperada: `contar_leyes(estado="repealed")` sin país pasa de 9.658 a 10.252, las 594 leyes británicas que el título da por derogadas. `avisos_estado` vale 0 en es, eu, fr y se; ningún `aviso_estado` fuera de uk.
+- T019, sobre el índice UK: `contar_leyes(estado="repealed")` 594 y `buscar_ley` paginado 594 (SC-001); `in_force` 86.077; `estadisticas(pais="uk")` da `avisos_estado` 594 con `estados["in_force"]` en 86.671 (SC-002); `ukpga-1963-36` sale `in_force` con `aviso_estado` «(Repealed 25.10.1991)». R7, p95 con 200 repeticiones frente a T003: `buscar_ley` 0,39 ms (antes 8,76: ahora encuentra resultados y para antes) y `contar_leyes` 8,40 ms (antes 8,80).
+- T020: 813 passed, 2 skipped; self-test OK (huella 546d466524e0).
