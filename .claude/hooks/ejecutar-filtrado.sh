@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Ejecuta un comando de test/build, guarda la salida completa en .claude/logs/
-# y muestra solo lo útil: líneas de error con algo de contexto y el resumen final.
+# Ejecuta un comando de test, guarda la salida completa en .claude/logs/ y
+# muestra solo lo útil: líneas de error con algo de contexto y el resumen final.
 # Conserva el código de salida del comando original.
+#
+# Recibe el comando ya separado en argumentos y lo ejecuta tal cual, sin pasar
+# por `bash -c`: lo que validó filtrar-tests.sh es exactamente lo que se ejecuta.
 
 set -uo pipefail
 
-cmd="$1"
+cmd="$*"
 log_dir="${CLAUDE_PROJECT_DIR:-.}/.claude/logs"
 mkdir -p "$log_dir"
 log_file="$log_dir/$(date +%Y%m%d-%H%M%S)-$(printf '%s' "$cmd" | tr -c 'A-Za-z0-9' '_' | cut -c1-40).log"
 
-bash -c "$cmd" >"$log_file" 2>&1
+"$@" >"$log_file" 2>&1
 rc=$?
 
 total_lines=$(wc -l <"$log_file" | tr -d ' ')
