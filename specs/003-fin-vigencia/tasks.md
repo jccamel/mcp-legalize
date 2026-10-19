@@ -149,19 +149,19 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T014 [P] `specs/002-indice-sqlite/paridad/banco.py`: `fecha_fin_vigencia` en
+- [X] T014 [P] `specs/002-indice-sqlite/paridad/banco.py`: `fecha_fin_vigencia` en
   `CAMPOS_NUEVOS`.
-- [ ] T015 [P] `README.md` y `README.es.md`: el campo y los filtros en «Tools», y que tras
+- [X] T015 [P] `README.md` y `README.es.md`: el campo y los filtros en «Tools», y que tras
   actualizar hay que reindexar antes de reiniciar el servidor. `tests/test_readme_es.py`
   sigue en verde (comprueba que las dos versiones nombren lo mismo).
-- [ ] T016 Reindexar es, eu, fr y se (`check_updates` debe pedirlo como `FORMATO`). Ejecutar
+- [X] T016 Reindexar es, eu, fr y se (`check_updates` debe pedirlo como `FORMATO`). Ejecutar
   el banco y compararlo con `specs/003-fin-vigencia/paridad/referencia.json`. Las únicas
   diferencias admitidas son peticiones con `derogada_desde`/`derogada_hasta` que ahora
   incluyen leyes europeas `repealed` (Q1): comprobar cada una y anotarlas en Notes.
-- [ ] T017 Quickstart §3–§5 sobre los índices reales (SC-001, SC-002, SC-003, SC-005) y
+- [X] T017 Quickstart §3–§5 sobre los índices reales (SC-001, SC-002, SC-003, SC-005) y
   medición del filtro nuevo sobre EU (R7: p95; índice SQL solo si supera 5 ms). Anotar en
   Notes.
-- [ ] T018 `pytest -rs` (los 2 skips de Windows) y `--self-test`. Commit final
+- [X] T018 `pytest -rs` (los 2 skips de Windows) y `--self-test`. Commit final
   `docs: close spec 003 - end of validity in the READMEs, parity and measurements`.
   Recordar `/security-review` al usuario (toca el índice y lo que se devuelve al modelo).
 
@@ -198,5 +198,15 @@ Una sola PR; cada commit pasa la suite.
 
 - Línea base (T001, 2026-10-19, rama en 1ee3893): 684 passed, 2 skipped; self-test OK (huella 546d466524e0); `check_updates` con todo al día.
 - Referencia de paridad (T002): 1.178 peticiones, generada con el código en 1ee3893 y los índices de formato 1. `specs/003-fin-vigencia/paridad/referencia.json` (ignorada por git), sha256 4983973aafbbe78d…
-- Paridad tras la feature (T016): _pendiente_
-- Mediciones (T017): _pendiente_
+- Paridad tras la feature (T016, 2026-10-19). Se reindexaron los cuatro corpus, que `check_updates` daba como `FORMATO` (`esquema_inesperado`): se 8,5 s, fr 17,5 s, eu 80 s y es 149 s. Resultado: 1.178 peticiones; `fecha_fin_vigencia` sale rellena en 313 respuestas.
+  - Hay 4 diferencias, todas de Q1 y comprobadas una a una:
+    - `contar_leyes` con `derogada_desde="2000"` sube en 1.016, tanto en eu (0 → 1.016) como en total (5.462 → 6.478). Son exactamente las leyes EU `repealed`, sin `repeal_date` y con `end_of_validity` desde 2000, contadas en los ficheros;
+    - en las dos `buscar_ley` de eu con ese filtro, todos los resultados nuevos son leyes `repealed` de EU con fecha de fin desde 2000.
+  - Ninguna otra diferencia.
+- Mediciones (T017, sobre los índices reales):
+  - SC-001: 2.267 leyes EU con `fecha_fin_vigencia`.
+  - SC-002: `estado="expired"` con `derogada_desde="1900"` da 0, y `repealed` da 1.061.
+  - SC-003: expiradas en 2010, 51 en los ficheros, 51 con `contar_leyes` y 51 con `buscar_ley`.
+  - SC-005: lo cubre el test y la ejecución real (FORMATO → al día con una sola pasada).
+  - R7: filtro de fin de vigencia sobre eu, p95 de 2,8 ms en `contar_leyes` y 2,1 ms en `buscar_ley`. Por debajo de los 5 ms, así que no hace falta índice SQL.
+  - Suite final: 714 passed y 2 skips de Windows; self-test OK.
