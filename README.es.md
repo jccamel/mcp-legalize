@@ -163,7 +163,11 @@ propone la orden que lo resuelve. Ejecutarla una vez lo resuelve, sin flags:
 | `RAÍZ` | El índice sitúa su corpus fuera de `LEGALIZE_REPOS_DIR`. No se comprueba nada ahí, ni siquiera se ejecuta git |
 
 Cada pasada escribe sobre una copia del índice y la sustituye entera, así que una
-pasada interrumpida deja intacto el índice anterior. Una pasada incremental sobre
+pasada interrumpida deja intacto el índice anterior. Un corpus cuyo
+`.legalize.yml` declare un `spec_version` más nuevo que el implementado (0.4), o
+uno que no se pueda leer, se rechaza y su índice se conserva, como exige la
+especificación de Legalize; un corpus sin ese fichero es anterior a ella y se
+indexa. Una pasada incremental sobre
 el 1 % del corpus español (25.889 leyes) tarda 6,7 s; una completa, unos 3,5
 minutos.
 

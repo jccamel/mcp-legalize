@@ -402,6 +402,14 @@ def main() -> None:
     if not repo_dir.is_dir():
         print(f"[ERROR] Directorio del repositorio no encontrado: {repo_dir}", file=sys.stderr)
         sys.exit(1)
+    # Antes de leer nada: un corpus escrito para una spec más nueva se rechaza
+    # entero y el índice vigente no se toca (Legalize Format Spec v0.4).
+    try:
+        legalize_repo.comprobar_spec(repo_dir)
+    except ValueError as exc:
+        print(f"[ERROR] {repo_dir.name!r}: {exc}. No se indexa; el índice actual "
+              f"se conserva.", file=sys.stderr)
+        sys.exit(2)
 
     repo_name = repo_dir.name
     fallback_pais = args.pais or (repo_name.replace("legalize-", "") if "legalize-" in repo_name else "")
