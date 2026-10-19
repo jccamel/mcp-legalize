@@ -175,3 +175,20 @@ def test_an_index_of_the_previous_format_is_reported_and_rebuilt_once(
 
     assert "FORMATO" not in comprobar()
     assert li.como_dict(indice)["documentos"]["EXP"]["fecha_fin_vigencia"] == "2005-05-20"
+
+
+@pytest.mark.parametrize("fecha", ["٢٠٢٠-٠١-٠١", "２０２０", "2020-0１"],
+                         ids=["arabic-indic", "fullwidth year", "mixed"])
+def test_a_date_written_with_non_ascii_digits_is_not_a_date(indexer_cli, fecha):
+    """Found by the security review of spec 003: Python's `\\d` matches any
+    Unicode digit and `int()` accepts them, so `٢٠٢٠-٠١-٠١` was stored. It
+    then compares as text against "2020" and sorts nowhere sensible. A date
+    from the source is written in ASCII digits; anything else is dropped like
+    any other value that is not a date (FR-001)."""
+    escribir(indexer_cli.repo, "a.md", identifier="NOASCII", status="expired", end_of_validity=fecha)
+    proc = indexer_cli.correr("--pais", "eu")
+    assert proc.returncode == 0, proc.stderr
+
+    documentos = indexer_cli.leer()["documentos"]
+
+    assert campos(documentos, "NOASCII") == (None, None, "expired")
