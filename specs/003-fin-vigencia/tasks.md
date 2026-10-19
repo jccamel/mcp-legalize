@@ -89,15 +89,15 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 **Independent Test**: escenarios 1–3 de la historia 1.
 
-- [ ] T007 [P] [US1] Crear `tests/test_fin_vigencia.py` con `instalar_corpus` (los mismos
+- [X] T007 [P] [US1] Crear `tests/test_fin_vigencia.py` con `instalar_corpus` (los mismos
   casos que T003 ya resueltos): `buscar_ley`, `obtener_ley` y `obtener_articulo` devuelven
   `fecha_fin_vigencia` con la fecha o `None`; una `in_force` futura sigue siendo `in_force`;
   un valor hostil en la columna (base de datos manipulada) llega saneado. Debe fallar: el
   campo no existe.
-- [ ] T008 [US1] En `mcp_legalize.py`: `fecha_fin_vigencia: Optional[str] = None` en
+- [X] T008 [US1] En `mcp_legalize.py`: `fecha_fin_vigencia: Optional[str] = None` en
   `DocumentoResumen`, `LeyCompleta` y `ArticuloResultado`, rellenado en un solo sitio
   (junto a `_estado_del_texto`) con `_sanitize_metadata(..., max_len=50)`, o `None` si vacío.
-- [ ] T009 [US1] Instrucciones del servidor: qué es `fecha_fin_vigencia`, que puede ser
+- [X] T009 [US1] Instrucciones del servidor: qué es `fecha_fin_vigencia`, que puede ser
   futura y que no cambia el estado. Commit
   `feat: tell the client when a law stops being in force`.
 

@@ -102,6 +102,9 @@ class DocumentoResumen(BaseModel):
     # sabe y no se lo inventa.
     estado_texto: Optional[str] = None
     ultima_modificacion: Optional[str] = None
+    # Cuándo dejó o dejará de estar en vigor, tal como lo da la fuente; puede
+    # ser futura. None si la fuente no lo da (spec 003).
+    fecha_fin_vigencia: Optional[str] = None
 
 class LeyCompleta(BaseModel):
     id: str
@@ -115,6 +118,7 @@ class LeyCompleta(BaseModel):
     bytes: int
     estado_texto: Optional[str] = None
     ultima_modificacion: Optional[str] = None
+    fecha_fin_vigencia: Optional[str] = None
     texto: Optional[str] = None
     texto_truncado: Optional[bool] = None
     chars_totales: Optional[int] = None
@@ -138,6 +142,7 @@ class ArticuloResultado(BaseModel):
     # artículo `as_enacted` no incorpora las modificaciones posteriores.
     estado_texto: Optional[str] = None
     ultima_modificacion: Optional[str] = None
+    fecha_fin_vigencia: Optional[str] = None
     texto: Optional[str] = None
     posicion_caracter: Optional[int] = None
     # Los mismos tres campos que `LeyCompleta`. `texto_truncado` vale False en
@@ -534,20 +539,22 @@ def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
         ultima_actualizacion=_sanitize_metadata(doc.get("ultima_actualizacion", ""), max_len=50),
         fuente=_sanitize_metadata(doc.get("fuente", ""), max_len=500),
         bytes=_bytes_de(doc),
-        **_estado_del_texto(doc),
+        **_estado_y_vigencia(doc),
     )
 
-def _estado_del_texto(doc: dict) -> dict:
-    """`estado_texto` y `ultima_modificacion`, saneados, o None si el índice no los trae.
+def _estado_y_vigencia(doc: dict) -> dict:
+    """Qué es el texto y hasta cuándo vale la ley, saneados, o None si no consta.
 
-    Un índice anterior a que se registraran no los tiene, y entonces la
-    respuesta es None y no `point_in_time`: el indexador ya resolvió la regla
-    de la spec para la ausencia en el frontmatter; aquí la ausencia es del
-    índice, y no dice nada del texto.
+    `estado_texto` y `ultima_modificacion` dicen qué es el cuerpo;
+    `fecha_fin_vigencia`, cuándo dejó o dejará la ley de estar en vigor (spec
+    003). Los tres son valores del corpus que viajan en las tres herramientas
+    que devuelven una ley, así que salen de aquí y con el mismo saneado. Una
+    fecha futura se devuelve tal cual: el servidor no la compara con hoy ni
+    deduce de ella el estado.
     """
     return {
         campo: (_sanitize_metadata(doc[campo], max_len=100) if doc.get(campo) else None)
-        for campo in ("estado_texto", "ultima_modificacion")
+        for campo in ("estado_texto", "ultima_modificacion", "fecha_fin_vigencia")
     }
 
 # Caracteres prohibidos en una ruta del índice. Ninguna ruta legítima los
@@ -784,6 +791,11 @@ Estado del texto: cada ley trae `estado_texto`, que dice qué es su cuerpo.
 - as_enacted: el acto tal como se publicó; sus modificaciones NO están
   incorporadas. `ultima_modificacion` identifica la última, si la hubo. No
   presentes un artículo `as_enacted` como el texto vigente.
+
+Fin de vigencia: `fecha_fin_vigencia` es la fecha en que la ley dejó o dejará de
+estar en vigor, tal como la da la fuente. Puede ser futura en una ley que sigue
+`in_force`: compárala tú con la fecha de hoy. Que una ley se derogara o expirara
+lo dice `estado` (`repealed` o `expired`), no la fecha.
 
 Idioma: las CLAVES de la respuesta son de este servidor y van en castellano;
 los VALORES se reproducen literalmente del documento fuente y nunca se traducen.
@@ -1203,7 +1215,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             return ArticuloResultado(
                 id=id_safe, pais=pais_safe, titulo=titulo,
                 articulo_buscado=articulo_clean, texto=fragmento, posicion_caracter=start,
-                **_estado_del_texto(found_doc),
+                **_estado_y_vigencia(found_doc),
                 texto_truncado=truncado,
                 chars_totales=len(completo) if truncado else None,
                 chars_devueltos=len(fragmento_texto) if truncado else None,
@@ -1212,7 +1224,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo, articulo_buscado=articulo_clean,
                              error="Artículo no encontrado", ubicaciones=ubicaciones,
-                             **_estado_del_texto(found_doc))
+                             **_estado_y_vigencia(found_doc))
 
 def _conteos(pais: str, nombre: str) -> dict:
     """`{clave: total}` de los países pedidos, en orden de primera aparición.
