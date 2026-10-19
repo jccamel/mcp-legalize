@@ -16,7 +16,8 @@ PR #58 y #59.
 Una ley deja de estar en vigor de dos maneras distintas: la **deroga** otra norma, o
 **expira** porque ella misma fijaba hasta cuándo valía. El servidor solo conoce la primera:
 lee la fecha de derogación de `repeal_date`, una extensión de los corpus español y sueco, y la
-devuelve como `fecha_derogacion`, con los filtros `derogada_desde` y `derogada_hasta`.
+guarda en el índice como `fecha_derogacion` para los filtros `derogada_desde` y
+`derogada_hasta`. Esa fecha no se devuelve en ninguna respuesta: solo sirve para filtrar.
 
 El corpus europeo no trae `repeal_date`. Trae `end_of_validity`, otra extensión (ninguna de
 las dos está en el núcleo de la Legalize Format Spec v0.4), con la fecha en que la ley dejó
@@ -71,8 +72,8 @@ vigor con fecha futura y sin fecha), las tres primeras devuelven su fecha y la c
 **Acceptance Scenarios**:
 
 1. **Given** una ley `expired` con `end_of_validity: 2005-05-20`, **When** el cliente la
-   obtiene, **Then** recibe la fecha 2005-05-20 en el campo de fin de vigencia, y
-   `fecha_derogacion` no la contiene.
+   obtiene, **Then** recibe la fecha 2005-05-20 en el campo de fin de vigencia, y los filtros
+   de derogación no la encuentran.
 2. **Given** una ley `in_force` con `end_of_validity: 2031-01-08`, **When** el cliente la
    obtiene, **Then** recibe la fecha 2031-01-08 como fin de vigencia y su estado sigue siendo
    `in_force`.
@@ -118,7 +119,8 @@ en los filtros de derogación (Q1), y una `expired` no aparece nunca.
 **Acceptance Scenarios**:
 
 1. **Given** una ley europea `repealed` con `end_of_validity: 2017-07-19`, **When** el
-   cliente filtra `derogada_desde="2017"`, **Then** la ley aparece, con `fecha_derogacion` 2017-07-19.
+   cliente filtra `derogada_desde="2017"`, **Then** la ley aparece, con `fecha_fin_vigencia`
+   2017-07-19.
 2. **Given** una ley europea `expired` con `end_of_validity: 2010-01-01`, **When** el cliente
    filtra por fecha de derogación, **Then** no aparece.
 
@@ -171,8 +173,9 @@ el remedio propuesto lo deja al día.
 - **FR-002**: `buscar_ley`, `obtener_ley` y `obtener_articulo` MUST devolver esa fecha en un
   campo nuevo y opcional, `fecha_fin_vigencia`, vacío cuando la ley no la tiene. Ningún campo
   existente cambia de nombre, de tipo ni de significado.
-- **FR-003**: Una fecha de `end_of_validity` de una ley `expired` MUST NOT aparecer nunca en
-  `fecha_derogacion` (decisión previa del usuario).
+- **FR-003**: Una fecha de `end_of_validity` de una ley `expired` MUST NOT usarse nunca como
+  fecha de derogación: los filtros de derogación no la encuentran (decisión previa del
+  usuario).
 
 **Derogación (historia 3)**
 
@@ -250,6 +253,13 @@ el remedio propuesto lo deja al día.
 - Q: ¿Qué se hace con las leyes `in_force` con fecha de fin futura? → A: la fecha va en
   `fecha_fin_vigencia` como cualquier otra; el servidor no la compara con la fecha de hoy
   (FR-008).
+
+### Corrección del 2026-10-19, al planificar
+
+La primera versión decía que `fecha_derogacion` se devuelve al cliente. No es así: hoy solo
+se guarda para filtrar. Se corrigieron el contexto, FR-003 y dos escenarios; las decisiones
+Q1–Q3 no cambian, y Q1 sigue siendo lo que encuentran los filtros de derogación. Devolver
+también `fecha_derogacion` queda fuera de alcance.
 
 ## Assumptions
 
