@@ -838,6 +838,7 @@ def _consultas(
     jurisdiccion: str, departamento: str, fecha_desde: str, fecha_hasta: str,
     derogada_desde: str, derogada_hasta: str,
     actualizada_desde: str, actualizada_hasta: str, frase: str,
+    fin_vigencia_desde: str, fin_vigencia_hasta: str,
     sin_consultar: list,
 ) -> list[tuple[str, str, list]]:
     """`(pais, where, parametros)` de cada país que la consulta debe recorrer.
@@ -865,7 +866,8 @@ def _consultas(
         consulta=consulta, rango=rango, estado=estado, anno=anno, jurisdiccion=jurisdiccion,
         departamento=departamento, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
         derogada_desde=derogada_desde, derogada_hasta=derogada_hasta,
-        actualizada_desde=actualizada_desde, actualizada_hasta=actualizada_hasta, match=match,
+        actualizada_desde=actualizada_desde, actualizada_hasta=actualizada_hasta,
+        fin_vigencia_desde=fin_vigencia_desde, fin_vigencia_hasta=fin_vigencia_hasta, match=match,
     )
     salida = []
     for codigo in paises:
@@ -942,6 +944,8 @@ def buscar_ley(
     limite: int = DEFAULT_LIMIT,
     offset: int = 0,
     frase: str = "",
+    fin_vigencia_desde: str = "",
+    fin_vigencia_hasta: str = "",
 ) -> list[DocumentoResumen] | ErrorRespuesta:
     """
     Busca leyes por múltiples criterios.
@@ -969,6 +973,9 @@ def buscar_ley(
       todo 2001.
     - derogada_desde / derogada_hasta: rango de fechas de derogación.
     - actualizada_desde / actualizada_hasta: rango de últimas actualizaciones.
+    - fin_vigencia_desde / fin_vigencia_hasta: rango de fechas de fin de vigencia
+      (`fecha_fin_vigencia`), con la misma precisión que los demás. Con `estado`
+      se separan las expiradas (`expired`) de las derogadas (`repealed`).
     - limite / offset: paginación.
 
     Los tres últimos campos ya se indexaban y se devolvían en cada resultado;
@@ -995,7 +1002,8 @@ def buscar_ley(
     for pais_code, doc_id, doc in _filtrar_docs(
         consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
         fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-        actualizada_desde, actualizada_hasta, frase, sin_consultar=sin_consultar,
+        actualizada_desde, actualizada_hasta, frase, fin_vigencia_desde, fin_vigencia_hasta,
+        sin_consultar=sin_consultar,
     ):
         if skipped < offset:
             skipped += 1
@@ -1029,6 +1037,8 @@ def contar_leyes(
     actualizada_desde: str = "",
     actualizada_hasta: str = "",
     frase: str = "",
+    fin_vigencia_desde: str = "",
+    fin_vigencia_hasta: str = "",
 ) -> Conteo | ErrorRespuesta:
     """
     Cuenta cuántas leyes cumplen unos filtros, sin devolverlas.
@@ -1058,7 +1068,8 @@ def contar_leyes(
         for codigo, where, parametros in _consultas(
             consulta, texto, pais, rango, estado, anno, jurisdiccion, departamento,
             fecha_desde, fecha_hasta, derogada_desde, derogada_hasta,
-            actualizada_desde, actualizada_hasta, frase, sin_consultar,
+            actualizada_desde, actualizada_hasta, frase, fin_vigencia_desde, fin_vigencia_hasta,
+            sin_consultar,
         )
     )
     return Conteo(total=total, sin_consultar=[
