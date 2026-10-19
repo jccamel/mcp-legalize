@@ -74,7 +74,7 @@ con el mismo intérprete y el mismo script.
 | `buscar_ley` | Leyes por título, país, subjurisdicción, departamento, rango, estado, año, o por un intervalo de fechas de publicación, derogación, última actualización o fin de vigencia (inclusivo: `"2001"` es todo 2001). En el cuerpo: `texto` para palabras en cualquier orden, `frase` para una frase exacta |
 | `contar_leyes` | Cuántas leyes cumplen esos mismos filtros, y en qué países no se pudo buscar por texto |
 | `obtener_ley` | El texto completo y los metadatos de una ley. Los ids no distinguen mayúsculas |
-| `obtener_articulo` | Un artículo, localizado por su encabezado y terminado en el siguiente artículo o sección, nunca en una mención dentro del texto. Reconoce `Artículo N`, `Article N`, `N §` y `§ N` |
+| `obtener_articulo` | Un artículo, localizado por su encabezado y terminado en el siguiente artículo o sección, nunca en una mención dentro del texto. Reconoce `Artículo N`, `Article N`, `N §` y `§ N` y, en una ley sin ninguno de ellos, un encabezado que es solo el número de la sección, como numera las suyas la legislación británica |
 | `listar_rangos` | Los tipos de norma, con su frecuencia |
 | `estadisticas` | Cifras generales de los corpus cargados |
 
