@@ -390,7 +390,8 @@ _CONTEOS = {
 def contar(con: sqlite3.Connection) -> dict:
     """Los conteos de `estadisticas` y `listar_rangos` de un índice.
 
-    `{"estados" | "rangos" | "annos": [[clave, total], ...], "bytes": total}`.
+    `{"estados" | "rangos" | "annos": [[clave, total], ...], "bytes": total,
+    "avisos_estado": total}`.
     Cada lista va en orden de primera aparición en el corpus: los listados
     ordenan por total con un `sorted` estable, así que los empates salen en ese
     orden, como cuando se contaba recorriendo el índice en memoria. Los bytes
@@ -409,6 +410,15 @@ def contar(con: sqlite3.Connection) -> dict:
     }
     salida["bytes"] = con.execute(
         "SELECT total(CASE WHEN typeof(bytes) = 'integer' THEN bytes END) FROM leyes").fetchone()[0]
+    # Las leyes con aviso de estado (spec 004): archivadas como `repealed` con
+    # un estado que no lo dice. `estadisticas` cuenta `estados` literal, y sin
+    # este total no se vería por qué no cuadra con `contar_leyes`.
+    contradecibles = legalize_estado.ESTADOS_CONTRADECIBLES
+    salida["avisos_estado"] = con.execute(
+        f"SELECT count(*) FROM leyes WHERE estado_norm = ? "
+        f"AND estado IN ({', '.join('?' * len(contradecibles))})",
+        (legalize_normalizacion.normalizar(legalize_estado.ESTADO_ARCHIVADO), *contradecibles),
+    ).fetchone()[0]
     return salida
 
 
@@ -429,6 +439,9 @@ def conteos_validos(valor) -> dict | None:
             return None
     total = valor.get("bytes")
     if isinstance(total, bool) or not isinstance(total, (int, float)) or total < 0:
+        return None
+    avisos = valor.get("avisos_estado")
+    if isinstance(avisos, bool) or not isinstance(avisos, int) or avisos < 0:
         return None
     return valor
 

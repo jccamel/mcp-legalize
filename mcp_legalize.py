@@ -214,7 +214,10 @@ class Estadisticas(BaseModel):
     total_documentos: int
     total_megabytes: float
     paises: list[str]
+    # `estados` cuenta el estado tal como lo da la fuente; `avisos_estado`,
+    # cuántas leyes tienen aviso porque su título lo contradice (spec 004).
     estados: dict[str, int]
+    avisos_estado: int = 0
     top_rangos: list[RangoConteo]
     top_annos_publicacion: list[AnnoConteo]
 
@@ -988,6 +991,8 @@ def buscar_ley(
     - pais: código ISO (es, se, at, de, fr…).
     - rango: tipo de norma (ley, forordning, Verordnung…).
     - estado: in_force, repealed, partially_repealed, annulled, expired.
+      `repealed` incluye las leyes con `aviso_estado` (su título dice que se
+      derogaron), y `in_force` no las incluye.
     - anno: año exacto de publicación (e.g. "2001").
     - jurisdiccion: sub-jurisdicción (e.g. "es-an", "es-ct").
     - departamento: organismo que la dicta (e.g. "hacienda", "jefatura").
@@ -1272,8 +1277,8 @@ def _conteos(pais: str, nombre: str) -> dict:
         meta = _META_POR_PAIS[codigo]
         if meta.get("conteos") is None:
             meta["conteos"] = legalize_indice.contar(_CONEXIONES[codigo])
-        if nombre == "bytes":
-            conteo[codigo] = meta["conteos"]["bytes"]
+        if nombre in ("bytes", "avisos_estado"):
+            conteo[codigo] = meta["conteos"][nombre]
             continue
         for clave, total in meta["conteos"][nombre]:
             # Las claves son valores del corpus. Dos que se sanean igual suman
@@ -1297,13 +1302,14 @@ def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
     rangos = _conteos(pais, "rangos")
     annos = _conteos(pais, "annos")
     total_bytes = sum(_conteos(pais, "bytes").values())
+    avisos = sum(_conteos(pais, "avisos_estado").values())
     paises_res = {codigo for codigo in _paises(pais)
                   if any(total for _, total in _META_POR_PAIS[codigo]["conteos"]["estados"])}
 
     return Estadisticas(
         total_documentos=sum(estados.values()),
         total_megabytes=round(total_bytes / 1_048_576, 1),
-        paises=sorted(paises_res), estados=estados,
+        paises=sorted(paises_res), estados=estados, avisos_estado=avisos,
         top_rangos=[RangoConteo(rango=r, total=c) for r, c in sorted(rangos.items(), key=lambda x: -x[1])[:10]],
         top_annos_publicacion=[AnnoConteo(anno=a, total=c) for a, c in sorted(annos.items(), key=lambda x: -x[1])[:10]]
     )
