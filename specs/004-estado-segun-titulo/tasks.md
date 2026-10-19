@@ -150,12 +150,12 @@ respuestas), US2 (el filtro por estado y `estadisticas`) y US3 (el operador rein
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T015 [P] `docs/decisiones/0012-aviso-de-estado.md` con la plantilla (contexto medido,
+- [X] T015 [P] `docs/decisiones/0012-aviso-de-estado.md` con la plantilla (contexto medido,
   decisión, alternativas de research R3 y R5, relación con el ADR 0001 y la Q3 de la spec 003,
   cómo revertirla) y línea en `docs/decisiones/README.md`.
-- [ ] T016 [P] `README.md` y `README.es.md`: `aviso_estado` en «Tools» y el filtro `repealed`;
+- [X] T016 [P] `README.md` y `README.es.md`: `aviso_estado` en «Tools» y el filtro `repealed`;
   reindexar tras actualizar. `tests/test_readme_es.py` en verde.
-- [ ] T017 [P] `CLAUDE.md`, «Estructura»: `legalize_estado.py — única regla de cuándo el
+- [X] T017 [P] `CLAUDE.md`, «Estructura»: `legalize_estado.py — única regla de cuándo el
   título contradice al estado`. `specs/002-indice-sqlite/paridad/banco.py`: `aviso_estado` y
   `avisos_estado` en `CAMPOS_NUEVOS`.
 - [ ] T018 Reindexar es, eu, fr, se y uk (`check_updates` debe pedirlo como `FORMATO`).

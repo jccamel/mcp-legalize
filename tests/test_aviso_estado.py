@@ -135,3 +135,13 @@ def test_statistics_keep_the_literal_status_and_count_the_warnings(corpus):
 
     assert resultado.estados == {"in_force": 6, "desconocido": 1, "repealed": 1}
     assert resultado.avisos_estado == len(CON_AVISO)
+
+
+@pytest.mark.parametrize("readme", ["README.md", "README.es.md"])
+def test_both_readmes_explain_the_warning(readme):
+    """A documented fact is pinned by a test (technical constraints)."""
+    from pathlib import Path
+
+    texto = (Path(__file__).resolve().parent.parent / readme).read_text(encoding="utf-8")
+
+    assert "`aviso_estado`" in texto and "`avisos_estado`" in texto

@@ -129,7 +129,7 @@ def ejecutar(raiz: Path, salida: Path):
 
 # Campos que el contrato añade (contracts/herramientas-mcp.md). Se comparan
 # solo si la referencia los tiene; si no, se cuentan aparte.
-CAMPOS_NUEVOS = {"ubicacion", "ubicaciones", "fecha_fin_vigencia"}
+CAMPOS_NUEVOS = {"ubicacion", "ubicaciones", "fecha_fin_vigencia", "aviso_estado", "avisos_estado"}
 
 
 def _sin_nuevos(valor, referencia, rellenos):
