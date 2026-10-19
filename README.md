@@ -238,7 +238,8 @@ outside it is not served, and the others are.
 The indexer scans every document in full, in the same six languages, plus
 universal markers such as `<|im_start|>` or `<script>`. A `block` finding
 quarantines the file; a `warn` finding — HTML comments and `eval(`, which Spanish
-technical annexes are full of — is only recorded. Text is NFKC-normalised and
+technical annexes are full of, or a role label such as `User:` alone on its line —
+is only recorded. Text is NFKC-normalised and
 stripped of invisible characters first. `update_index.py --self-test` checks
 that every pattern still detects its own sample, and runs in CI. It is a canary,
 not a defence: obfuscation can evade it, which is why Mitigation 1 exists.

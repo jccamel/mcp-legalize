@@ -241,7 +241,8 @@ sirve, y los demás sí.
 El indexador analiza cada documento entero, en los mismos seis idiomas, más
 marcadores universales como `<|im_start|>` o `<script>`. Un hallazgo `block` pone
 el fichero en cuarentena; uno `warn` —comentarios HTML y `eval(`, que abundan en
-los anexos técnicos españoles— solo se registra. Antes se normaliza el texto con
+los anexos técnicos españoles, o una etiqueta de rol como `User:` sola en su
+línea— solo se registra. Antes se normaliza el texto con
 NFKC y se le quitan los caracteres invisibles. `update_index.py --self-test`
 comprueba que cada patrón sigue detectando su propia muestra, y se ejecuta en el
 CI. Es un canario, no una defensa: se puede esquivar ofuscando, y por eso existe
