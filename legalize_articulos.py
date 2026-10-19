@@ -104,11 +104,50 @@ NEXT_SECTION_RE = re.compile(
 # Separa los niveles de una ubicación: "TÍTULO I › CAPÍTULO II".
 SEPARADOR_UBICACION = " › "
 
+# Un encabezado que es solo un número, como numera sus secciones el corpus del
+# Reino Unido (`##### 2`, `##### 2A`). Medido el 2026-10-19 en una muestra de
+# 5.000 leyes británicas: 4.940 las numeran así. Cuenta como artículo SOLO en
+# una ley sin ningún encabezado de artículo de las formas de arriba, y solo
+# limpio, sin punto ni marcas: en el corpus español eso deja dos leyes, un
+# apartado de una exposición de motivos y un año en una tabla, documentadas en
+# el ADR 0011; en eu, fr y se, ninguna.
+_NUMERO_SUELTO = re.compile(r"\d+[A-Z]{0,3}")
+
 
 def es_otro_articulo(texto_encabezado: str) -> bool:
     """Si el texto de un encabezado nombra un artículo, sea cual sea su número."""
     texto = texto_encabezado.strip()
     return any(p.search(texto) for p in _OTRO_ARTICULO)
+
+
+def _numeros_sueltos(encabezados) -> bool:
+    """Si en este documento un encabezado que es solo un número es un artículo.
+
+    Lo es cuando ningún encabezado nombra un artículo de las formas conocidas.
+    Se decide por documento, así que donde ya hay `Artículo N` nada cambia.
+    """
+    return not any(es_otro_articulo(e.group(2)) for e in encabezados)
+
+
+def _es_suelto(texto_encabezado: str) -> bool:
+    return bool(_NUMERO_SUELTO.fullmatch(texto_encabezado.strip()))
+
+
+def _inicio(encabezados, i: int, sueltos: bool) -> int:
+    """Dónde empieza el artículo del encabezado `i`.
+
+    En una sección numerada solo con su número, el encabezado justo anterior,
+    un nivel por encima, es su título (`#### Prescribed processes…` sobre
+    `##### 2`): la sección empieza en él, para que el texto diga de qué trata.
+    En los demás documentos, en el propio encabezado, como siempre.
+    """
+    enc = encabezados[i]
+    if sueltos and i > 0:
+        previo = encabezados[i - 1]
+        if (len(previo.group(1)) == len(enc.group(1)) - 1
+                and not _es_suelto(previo.group(2))):
+            return previo.start()
+    return enc.start()
 
 
 def localizar(content: str, articulo: str, contexto_chars: int) -> tuple[int, int, int] | None:
@@ -130,18 +169,22 @@ def localizar(content: str, articulo: str, contexto_chars: int) -> tuple[int, in
     term = re.escape(articulo)
     patrones = [re.compile(tpl.format(term=term)) for tpl in ARTICULO_EN_ENCABEZADO_TEMPLATE]
     encabezados = list(ENCABEZADO_RE.finditer(content))
+    sueltos = _numeros_sueltos(encabezados)
     for i, enc in enumerate(encabezados):
         texto_enc = enc.group(2).strip()
-        if any(p.search(texto_enc) for p in patrones):
+        if (any(p.search(texto_enc) for p in patrones)
+                or (sueltos and _es_suelto(texto_enc) and texto_enc.casefold() == articulo.casefold())):
             nivel = len(enc.group(1))
             siguiente = next(
                 (e for e in encabezados[i + 1:]
-                 if len(e.group(1)) <= nivel or es_otro_articulo(e.group(2))),
+                 if len(e.group(1)) <= nivel or es_otro_articulo(e.group(2))
+                 or (sueltos and _es_suelto(e.group(2)))),
                 None,
             )
+            inicio = _inicio(encabezados, i, sueltos)
             if siguiente:
-                return enc.start(), siguiente.start(), siguiente.start()
-            return enc.start(), min(enc.end() + contexto_chars, len(content)), len(content)
+                return inicio, siguiente.start(), siguiente.start()
+            return inicio, min(enc.end() + contexto_chars, len(content)), len(content)
 
     for tpl in ARTICULO_EN_LINEA_TEMPLATE:
         m = re.search(tpl.format(term=term), content)
@@ -181,18 +224,21 @@ def localizar_todos(cuerpo: str) -> list[tuple[int, str, str, int, int, int, boo
     distinguen con " (2)", " (3)"…, en orden.
     """
     encabezados = list(ENCABEZADO_RE.finditer(cuerpo))
+    sueltos = _numeros_sueltos(encabezados)
     titulos_h1 = [e for e in encabezados if len(e.group(1)) == 1]
     omitir = titulos_h1[0].start() if len(titulos_h1) == 1 else None
 
     salida: list[list] = []
     abierto: list | None = None
     pila: list[tuple[int, str]] = []
-    for enc in encabezados:
+    for i, enc in enumerate(encabezados):
         nivel, texto = len(enc.group(1)), enc.group(2).strip()
-        numero = _numero(texto)
+        numero = _numero(texto) or (texto if sueltos and _es_suelto(texto) else None)
         # La misma condición de cierre que `localizar`, con la misma función:
-        # nivel igual o superior, u otro artículo según `es_otro_articulo`.
-        if abierto is not None and (nivel <= abierto[7] or es_otro_articulo(texto)):
+        # nivel igual o superior, u otro artículo según `es_otro_articulo` o,
+        # en un documento de números sueltos, otro número suelto.
+        if abierto is not None and (nivel <= abierto[7] or es_otro_articulo(texto)
+                                    or (sueltos and _es_suelto(texto))):
             abierto[5], abierto[6] = enc.start(), False
             abierto = None
         if numero is None:
@@ -201,8 +247,14 @@ def localizar_todos(cuerpo: str) -> list[tuple[int, str, str, int, int, int, boo
             if enc.start() != omitir:
                 pila.append((nivel, texto))
             continue
-        ubicacion = SEPARADOR_UBICACION.join(t for n, t in pila if n < nivel)
-        fila = [len(salida), numero, ubicacion, enc.start(), enc.end(), len(cuerpo), True, nivel]
+        inicio = _inicio(encabezados, i, sueltos)
+        # Si la sección empieza en su título, el título ya va en el texto y no
+        # se repite en la ubicación.
+        contenedores = [(n, t) for n, t in pila if n < nivel]
+        if inicio != enc.start() and contenedores:
+            contenedores = contenedores[:-1]
+        ubicacion = SEPARADOR_UBICACION.join(t for _, t in contenedores)
+        fila = [len(salida), numero, ubicacion, inicio, enc.end(), len(cuerpo), True, nivel]
         salida.append(fila)
         abierto = fila
 

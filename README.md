@@ -73,7 +73,7 @@ the same interpreter and script.
 | `buscar_ley` | Laws by title, country, sub-jurisdiction, department, rank, status, year, or a publication, repeal, last-updated or end-of-validity date range (inclusive; `"2001"` means all of 2001). In the body: `texto` for words in any order, `frase` for an exact phrase |
 | `contar_leyes` | How many laws match the same filters, and in which countries full-text search could not run |
 | `obtener_ley` | Full text and metadata of one law. Ids match regardless of case |
-| `obtener_articulo` | One article, located by its heading and ending at the next article or section — never at a mention in the text. Recognises `Artículo N`, `Article N`, `N §` and `§ N` |
+| `obtener_articulo` | One article, located by its heading and ending at the next article or section — never at a mention in the text. Recognises `Artículo N`, `Article N`, `N §` and `§ N`, and, in a law with none of those, a heading that is just the section number, as UK legislation numbers its sections |
 | `listar_rangos` | Norm types with their frequency |
 | `estadisticas` | Overall figures for the loaded corpora |
 
