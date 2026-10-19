@@ -17,6 +17,7 @@ y `check_updates.py`, antes de ejecutar git en ella.
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -41,6 +42,45 @@ def raiz_del_corpus(directorio_base: str, proyecto: Path, autorizada: Path) -> P
             f"el corpus {directorio_base!r} está fuera de LEGALIZE_REPOS_DIR ({str(autorizada)!r})"
         )
     return raiz
+
+
+# La versión de la Legalize Format Spec que este proyecto implementa.
+SPEC_IMPLEMENTADA = (0, 4)
+
+# El manifiesto es YAML, pero de él solo se necesita `spec_version`, un escalar
+# en una línea propia. Una expresión estricta basta y evita una dependencia
+# nueva para leer un fichero que, además, viene del corpus: lo que no tenga
+# exactamente esta forma no se interpreta.
+_LINEA_SPEC = re.compile(r"^spec_version[ \t]*:(.*)$", re.MULTILINE)
+_VALOR_SPEC = re.compile(
+    r"""^[ \t]*(?:"(\d+(?:\.\d+)*)"|'(\d+(?:\.\d+)*)'|(\d+(?:\.\d+)*))[ \t]*(?:\#.*)?$""")
+
+
+def comprobar_spec(corpus_dir: Path) -> None:
+    """Lanza ValueError si el corpus está escrito para una spec más nueva o ilegible.
+
+    La spec v0.4 obliga a ello: "A consumer MUST refuse a repo whose
+    `spec_version` is newer than the version it implements", porque leer un
+    manifiesto nuevo con reglas viejas da rutas equivocadas en vez de ausentes.
+    Un corpus sin `.legalize.yml` es anterior a la v0.4 y la spec manda leerlo
+    como si declarara su disposición por defecto, así que se acepta. Un
+    manifiesto cuya versión no se puede leer se rechaza igual que uno más
+    nuevo: nada demuestra que no lo sea.
+    """
+    manifiesto = Path(corpus_dir) / ".legalize.yml"
+    if not manifiesto.is_file():
+        return
+    texto = manifiesto.read_text(encoding="utf-8", errors="replace")
+    lineas = _LINEA_SPEC.findall(texto)
+    if len(lineas) != 1:
+        raise ValueError(f"el manifiesto declara spec_version {len(lineas)} veces, no una")
+    valor = _VALOR_SPEC.match(lineas[0])
+    if not valor:
+        raise ValueError(f"spec_version ilegible: {lineas[0].strip()[:40]!r}")
+    version = next(v for v in valor.groups() if v)
+    if tuple(int(n) for n in version.split(".")) > SPEC_IMPLEMENTADA:
+        implementada = ".".join(map(str, SPEC_IMPLEMENTADA))
+        raise ValueError(f"spec_version {version!r} es más nueva que la implementada ({implementada})")
 
 
 # Nada de la configuración del propio repositorio puede hacer que git ejecute

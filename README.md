@@ -161,7 +161,10 @@ with no flags:
 | `RAÍZ` | The index places its corpus outside `LEGALIZE_REPOS_DIR`. Nothing is checked there — not even git is run |
 
 Every run writes into a copy of the index and swaps it in whole, so an
-interrupted run leaves the previous index untouched. An incremental run over 1%
+interrupted run leaves the previous index untouched. A corpus whose
+`.legalize.yml` declares a `spec_version` newer than the one implemented (0.4),
+or one that cannot be read, is refused and its index kept, as the Legalize
+spec requires; a corpus without that file predates it and is indexed. An incremental run over 1%
 of the Spanish corpus (25,889 laws) takes 6.7 s; a full one, about 3.5 minutes.
 
 ---
