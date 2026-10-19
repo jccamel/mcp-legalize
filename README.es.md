@@ -79,7 +79,8 @@ con el mismo intérprete y el mismo script.
 | `estadisticas` | Cifras generales de los corpus cargados |
 
 La búsqueda por texto ignora los diacríticos (`forêt` = `foret`) y conserva la
-`ñ` como letra (`año` ≠ `ano`). En `texto` se ignoran las palabras de menos de
+`ñ` como letra (`año` ≠ `ano`). También busca en griego y en cirílico, con el
+mismo plegado y conservando `й`, `ї` y `ў` como letras (`йод` ≠ `иод`). En `texto` se ignoran las palabras de menos de
 tres caracteres; en una `frase` cuentan, así que `"ley de 1978"` exige el `de`.
 Lo que escribe el cliente se busca siempre como texto: comillas, `AND`, `NEAR` o
 `*` nunca se leen como sintaxis de búsqueda.

@@ -78,7 +78,8 @@ the same interpreter and script.
 | `estadisticas` | Overall figures for the loaded corpora |
 
 Full-text search folds diacritics (`forêt` = `foret`) and keeps `ñ` as a letter
-(`año` ≠ `ano`). In `texto`, words under three characters are ignored; in a
+(`año` ≠ `ano`). Greek and Cyrillic are searchable too, folded the same way and
+keeping `й`, `ї` and `ў` as letters (`йод` ≠ `иод`). In `texto`, words under three characters are ignored; in a
 `frase` they count, so `"ley de 1978"` requires the `de`. Anything a client
 writes is searched as text: quotes, `AND`, `NEAR` or `*` are never read as
 search syntax.
