@@ -51,7 +51,12 @@ _MIN_LONGITUD = 3
 #
 # `huella` cubre la normalización entera, así que el día que cambie los índices
 # viejos quedan invalidados solos.
-_PATRON_TOKEN = re.compile(rf"[0-9a-zñ]{{{_MIN_LONGITUD},}}")
+# Griego y cirílico entran desde el ADR 0010: medido el 2026-10-19, 496 leyes
+# europeas tienen anexos en cirílico (125.345 palabras) y 431 en griego
+# (26.167), que `texto` no podía encontrar. Ya llegan plegados: el griego sin
+# tildes ni diéresis (α-ω, con la sigma final ς) y el cirílico en minúsculas
+# (а-џ, más ґ), conservando й, ї y ў como letras.
+_PATRON_TOKEN = re.compile(rf"[0-9a-z\u00f1\u03b1-\u03c9\u0430-\u045f\u0491]{{{_MIN_LONGITUD},}}")
 
 # Presencia o frecuencia. Entra en la huella a propósito: si algún día se guarda
 # la frecuencia para poder ordenar por relevancia, los índices construidos con
@@ -115,7 +120,7 @@ def huella() -> str:
         # plegado lo deciden NFD y el patrón de marcas, no la tabla.
         inspect.getsource(legalize_normalizacion.normalizar),
         legalize_normalizacion._MARCAS_RE.pattern,
-        legalize_normalizacion._ENYE_DESCOMPUESTA,
+        repr(sorted(legalize_normalizacion._CONSERVADAS.items())),
         # El código de `separar` y no su delimitador: la regla de qué cuenta
         # como frontmatter está en la lógica —qué cierra el bloque, qué pasa si
         # no cierra—, no solo en la cadena "---". A2 se abrió precisamente

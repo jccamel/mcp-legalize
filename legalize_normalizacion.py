@@ -52,8 +52,19 @@ TABLA = str.maketrans({
 # llevan el acento, la diéresis, la cedilla o el anillo.
 _MARCAS_RE = re.compile("[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]")
 
-# `n` seguida de la tilde combinante, que es como NFD descompone la `ñ`.
-_ENYE_DESCOMPUESTA = "ñ"
+# Letras que NFD separa en base + marca pero que son letras propias de su
+# alfabeto, no vocales acentuadas: plegarlas funde palabras distintas. Se
+# recomponen antes de quitar las marcas.
+#   - `ñ`: *año* no es *ano* (ADR 0008).
+#   - `й`, `ї`, `ў`: en ruso, búlgaro, ucraniano y bielorruso son letras del
+#     alfabeto; `йод` (yodo) no es `иод` (ADR 0010).
+# `ё` no está: plegarla a `е` es la equivalencia habitual al buscar en ruso.
+_CONSERVADAS = {
+    "n\u0303": "\u00f1",
+    "\u0438\u0306": "\u0439",
+    "\u0456\u0308": "\u0457",
+    "\u0443\u0306": "\u045e",
+}
 
 
 def normalizar(texto: str) -> str:
@@ -63,5 +74,6 @@ def normalizar(texto: str) -> str:
     `translate`—, porque el tokenizador pasa por aquí el corpus entero.
     """
     descompuesto = unicodedata.normalize("NFD", texto.lower())
-    con_enye = descompuesto.replace(_ENYE_DESCOMPUESTA, "ñ")
-    return _MARCAS_RE.sub("", con_enye).translate(TABLA)
+    for separada, letra in _CONSERVADAS.items():
+        descompuesto = descompuesto.replace(separada, letra)
+    return _MARCAS_RE.sub("", descompuesto).translate(TABLA)
