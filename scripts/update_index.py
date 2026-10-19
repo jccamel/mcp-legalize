@@ -202,7 +202,10 @@ def _scan_metadatos(entry: dict) -> list[str]:
             hallazgos.append(f"{campo}: {h.label}")
     return hallazgos
 
-_FECHA_RE = re.compile(r"(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?")
+# `[0-9]` y no `\d`: en Python `\d` acepta cualquier dígito Unicode, e
+# `int()` también, así que "٢٠٢٠-٠١-٠١" pasaba por fecha y luego se comparaba
+# como texto con "2020" (revisión de seguridad de la spec 003).
+_FECHA_RE = re.compile(r"([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?")
 
 
 def _fecha_valida(valor) -> str:
