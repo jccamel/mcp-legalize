@@ -127,7 +127,7 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 **Independent Test**: escenarios 1–2 de la historia 3.
 
-- [ ] T012 [P] [US3] En `tests/test_fin_vigencia.py`, con un corpus construido **por el
+- [X] T012 [P] [US3] En `tests/test_fin_vigencia.py`, con un corpus construido **por el
   indexador** (la regla de Q1 vive allí): una `repealed` con solo `end_of_validity` aparece
   con `derogada_desde`; una `expired` con fecha no aparece nunca con ningún filtro de
   derogación. Si T005 ya está, este test pasa: se comprueba quitando temporalmente la regla
@@ -139,7 +139,7 @@ filtros de derogación, Q1) y US4 (el operador reindexa una vez).
 
 **Goal**: FR-012.
 
-- [ ] T013 [P] [US4] En `tests/test_fin_vigencia_indexador.py`: un índice escrito con el
+- [X] T013 [P] [US4] En `tests/test_fin_vigencia_indexador.py`: un índice escrito con el
   formato 1 (construido con un esquema de formato 1 a mano en el test) → `check_updates`
   informa `FORMATO`; `update_index.py --repo` sin flags lo deja al día y con la fecha. Si ya
   pasa (el mecanismo es el de la spec 002), se comprueba bajando `FORMATO` a mano y viéndolo
