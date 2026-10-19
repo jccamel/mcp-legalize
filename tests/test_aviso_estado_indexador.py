@@ -74,3 +74,70 @@ def test_the_status_is_kept_exactly_as_the_corpus_gives_it(indexado):
 def test_a_law_is_filed_under_repealed_when_its_title_contradicts_its_status(indexado, id_ley):
     """Its own status otherwise: a mark mid-title or with a look-alike letter is not one."""
     assert estado_filtrado(indexado)[id_ley] == CASOS[id_ley][2]
+
+
+# ──────────────────── the operator rebuilds once (US3) ──────────────────────
+
+def test_an_index_of_the_previous_format_is_reported_and_rebuilt_once(
+    check_updates, tmp_path, monkeypatch, capsys,
+):
+    """An index filed before the rule existed would answer the status filter
+    wrongly without saying so. It is reported as FORMATO, and the remedy, run
+    once with no flags, files the law under repealed."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = tmp_path / "repos" / "legalize-xx"
+    escribir(repo, "REP", "Licensing Act 1964 (repealed)", "in_force")
+    indices = tmp_path / "indices"
+    indices.mkdir()
+    indice = indices / "index_legalize-xx.db"
+
+    def indexar():
+        proc = subprocess.run(
+            [sys.executable, str(Path(check_updates.__file__).parent / "update_index.py"),
+             "--repo", str(repo), "--index", str(indice)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr
+
+    indexar()
+    # Lo que dejaba el formato 2: el estado plegado, sin la regla.
+    con = sqlite3.connect(indice)
+    con.execute("UPDATE leyes SET estado_norm = 'in_force'")
+    con.execute("UPDATE meta SET valor = ? WHERE clave = 'formato'", (json.dumps("2"),))
+    con.commit()
+    con.close()
+
+    monkeypatch.setattr(check_updates, "_INDICES_DIR", indices)
+    monkeypatch.setattr(check_updates, "_PROJECT_DIR", tmp_path)
+    monkeypatch.setattr(check_updates.legalize_repo, "head_commit", lambda _: "")
+
+    def comprobar():
+        try:
+            check_updates.main()
+        except SystemExit:
+            pass
+        return capsys.readouterr().out
+
+    assert "FORMATO" in comprobar()
+    indexar()
+    assert "FORMATO" not in comprobar()
+    con = sqlite3.connect(indice)
+    assert con.execute("SELECT estado_norm FROM leyes").fetchone() == ("repealed",)
+    con.close()
+
+
+def test_changing_the_rule_changes_the_index_format(monkeypatch):
+    """Principle VII: the stamp comes from the rule, so nobody has to bump it."""
+    import re
+
+    import legalize_estado
+
+    antes = legalize_estado.huella()
+    otra = re.compile(r"\((?:repealed)\b[^()]*\)\s*$", legalize_estado._MARCA_RE.flags)
+    monkeypatch.setattr(legalize_estado, "_MARCA_RE", otra)
+
+    assert legalize_estado.huella() != antes

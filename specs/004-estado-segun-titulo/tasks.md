@@ -140,7 +140,7 @@ respuestas), US2 (el filtro por estado y `estadisticas`) y US3 (el operador rein
 
 **Goal**: FR-011.
 
-- [ ] T014 [P] [US3] En `tests/test_aviso_estado_indexador.py`: un índice construido y luego
+- [X] T014 [P] [US3] En `tests/test_aviso_estado_indexador.py`: un índice construido y luego
   con `meta.formato` puesto a `"2"` → `check_updates` informa `FORMATO`; `update_index.py
   --repo` sin flags lo deja al día y con `estado_norm` correcto. Y un cambio de la regla cambia
   `FORMATO` (monkeypatch de `legalize_estado._MARCA_RE` → `huella()` distinta). Si ya pasa,
@@ -202,3 +202,4 @@ Una sola PR; cada commit pasa la suite.
 - T004 visto fallar: 5 de 9 casos (REP, REV, FEC, PAR, VAC), porque `estado_norm` guardaba el estado plegado (`in_force` o vacío). Con T005–T006 pasan los 10; suite 789 passed, 2 skipped.
 - T008 visto fallar: los 12 casos de las tres herramientas, por `AttributeError` (el campo no existía); el de las instrucciones, porque no nombraban `aviso_estado`. Con T009–T010 pasan; suite 802 passed, 2 skipped.
 - T011 visto fallar: `avisos_estado` no existía en `Estadisticas`. Los filtros ya pasaban por T006; quitando `estado_filtrable` de `poner_ley` fallaron `repealed` e `in_force`, y se restauró. Suite tras T013: 809 passed, 2 skipped.
+- T014 pasaba a la primera (el mecanismo de `FORMATO` es el de la spec 002). Visto fallar fijando `FORMATO = "2"` a mano (el índice viejo salía «al día») y quitando el patrón de `huella()`. En ese segundo caso, el primer intento no falló porque el regex de prueba tenía otros flags; ahora usa los mismos.
