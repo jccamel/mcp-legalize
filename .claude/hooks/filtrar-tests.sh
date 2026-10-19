@@ -3,8 +3,10 @@
 # reciba solo los fallos y un resumen, en lugar de miles de líneas de salida.
 # El log completo se guarda en .claude/logs/ por si hace falta consultarlo.
 #
-# Solo actúa sobre comandos SIMPLES (sin ; & | ` $( < > ni saltos de línea),
-# para no aprobar nunca una cadena de comandos que empiece por un test.
+# Solo aprueba las ejecuciones de tests de ESTE proyecto, con argumentos de una
+# lista blanca (ver comando_de_test.py). Cualquier otra orden sigue el flujo
+# normal de permisos: no se deniega, pero tampoco se aprueba en nombre del
+# usuario.
 
 set -euo pipefail
 
@@ -15,20 +17,22 @@ passthrough() { echo '{}'; exit 0; }
 
 [[ -z "$cmd" ]] && passthrough
 
-# Comandos compuestos, redirecciones o sustituciones: no tocar.
+# Comandos compuestos, redirecciones, sustituciones o expansiones: no tocar.
+# El validador ya los rechazaría; esto es una segunda barrera barata.
 case "$cmd" in
-  *';'*|*'&'*|*'|'*|*'`'*|*'$('*|*'<'*|*'>'*|*$'\n'*) passthrough ;;
+  *';'*|*'&'*|*'|'*|*'`'*|*'$'*|*'<'*|*'>'*|*$'\n'*|*$'\r'*) passthrough ;;
 esac
 
-# Comandos de test/build reconocidos (ajústalos a tu stack).
-pattern='^(npm (run )?test|npm run (build|lint)|pnpm (run )?test|pnpm (run )?build|yarn (run )?test|yarn (run )?build|pytest|(\.venv/bin/)?python3? -m pytest|(\.venv/bin/)?python3? scripts/update_index\.py --self-test|uv run pytest|go (test|build|vet)|cargo (test|build|clippy)|mvn (test|verify|package)|gradle(w)? (test|build)|\./gradlew (test|build)|make (test|check|build))( |$)'
+hooks="${CLAUDE_PROJECT_DIR:-.}/.claude/hooks"
+# -I: el validador no importa nada del directorio de trabajo.
+args_json="$(python3 -I "$hooks/comando_de_test.py" "$cmd")" || passthrough
 
-if [[ ! "$cmd" =~ $pattern ]]; then
-  passthrough
-fi
-
-runner="${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/ejecutar-filtrado.sh"
-new_cmd="$(printf '%q %q' "$runner" "$cmd")"
+# El ejecutor recibe los argumentos ya separados y los ejecuta tal cual, sin
+# volver a pasar por un shell que pudiera expandirlos de otra forma.
+new_cmd="$(printf '%q' "$hooks/ejecutar-filtrado.sh")"
+while IFS= read -r arg; do
+  new_cmd+=" $(printf '%q' "$arg")"
+done < <(printf '%s' "$args_json" | jq -r '.[]')
 
 jq -n --arg c "$new_cmd" --argjson orig "$(printf '%s' "$input" | jq '.tool_input')" '{
   hookSpecificOutput: {
