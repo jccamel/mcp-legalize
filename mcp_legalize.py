@@ -283,6 +283,8 @@ _PAIS_NOMBRE = {
     "dk": "Denmark",
     "no": "Norway",
     "pl": "Poland",
+    "uk": "United Kingdom",
+    "eu": "European Union",
     "mock": "Mock (testing)",
 }
 
