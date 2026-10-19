@@ -35,6 +35,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 import legalize_articulos
+import legalize_estado
 import legalize_frontmatter
 import legalize_normalizacion
 import legalize_indice
@@ -105,6 +106,10 @@ class DocumentoResumen(BaseModel):
     # Cuándo dejó o dejará de estar en vigor, tal como lo da la fuente; puede
     # ser futura. None si la fuente no lo da (spec 003).
     fecha_fin_vigencia: Optional[str] = None
+    # Del servidor, no de la fuente: la marca del final del título que
+    # contradice a `estado`, como `(repealed)`, tal cual. None si no la hay
+    # (spec 004).
+    aviso_estado: Optional[str] = None
 
 class LeyCompleta(BaseModel):
     id: str
@@ -119,6 +124,7 @@ class LeyCompleta(BaseModel):
     estado_texto: Optional[str] = None
     ultima_modificacion: Optional[str] = None
     fecha_fin_vigencia: Optional[str] = None
+    aviso_estado: Optional[str] = None
     texto: Optional[str] = None
     texto_truncado: Optional[bool] = None
     chars_totales: Optional[int] = None
@@ -143,6 +149,7 @@ class ArticuloResultado(BaseModel):
     estado_texto: Optional[str] = None
     ultima_modificacion: Optional[str] = None
     fecha_fin_vigencia: Optional[str] = None
+    aviso_estado: Optional[str] = None
     texto: Optional[str] = None
     posicion_caracter: Optional[int] = None
     # Los mismos tres campos que `LeyCompleta`. `texto_truncado` vale False en
@@ -551,10 +558,18 @@ def _estado_y_vigencia(doc: dict) -> dict:
     que devuelven una ley, así que salen de aquí y con el mismo saneado. Una
     fecha futura se devuelve tal cual: el servidor no la compara con hoy ni
     deduce de ella el estado.
+
+    `aviso_estado` es del servidor: la marca del final del título cuando
+    contradice al estado (spec 004). Sale de la misma regla con la que el índice
+    archiva la ley para el filtro, y del título, que es texto del corpus, así
+    que se sanea como él. Tope de 100: la marca más larga medida el 2026-10-19
+    en el corpus UK tiene 63 caracteres.
     """
+    marca = legalize_estado.aviso(doc.get("estado", ""), doc.get("titulo", ""))
     return {
-        campo: (_sanitize_metadata(doc[campo], max_len=100) if doc.get(campo) else None)
-        for campo in ("estado_texto", "ultima_modificacion", "fecha_fin_vigencia")
+        **{campo: (_sanitize_metadata(doc[campo], max_len=100) if doc.get(campo) else None)
+           for campo in ("estado_texto", "ultima_modificacion", "fecha_fin_vigencia")},
+        "aviso_estado": _sanitize_metadata(marca, max_len=100) if marca else None,
     }
 
 # Caracteres prohibidos en una ruta del índice. Ninguna ruta legítima los
@@ -796,6 +811,14 @@ Fin de vigencia: `fecha_fin_vigencia` es la fecha en que la ley dejó o dejará 
 estar en vigor, tal como la da la fuente. Puede ser futura en una ley que sigue
 `in_force`: compárala tú con la fecha de hoy. Que una ley se derogara o expirara
 lo dice `estado` (`repealed` o `expired`), no la fecha.
+
+Aviso de estado: `aviso_estado` es de este servidor, no de la fuente. Aparece
+cuando el título de la ley termina en una marca como `(repealed)`, `(revoked)` o
+`(repealed 25.10.1991)` y `estado` dice `in_force` o no dice nada: el título
+contradice al estado. Trae la marca tal cual, con su fecha y sus excepciones, sin
+interpretar. No presentes esa ley como vigente; si la marca dice que la
+derogación es parcial, dilo. Al filtrar, `estado="repealed"` la encuentra e
+`in_force` no, aunque `estado` siga diciendo `in_force`.
 
 Idioma: las CLAVES de la respuesta son de este servidor y van en castellano;
 los VALORES se reproducen literalmente del documento fuente y nunca se traducen.
