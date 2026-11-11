@@ -62,6 +62,10 @@ BODY_VOCABULARY = [
     # ponía la ley en cuarentena. Los índices se reescanean (huella nueva).
     ("generic.role_label", inj.SEVERITY_WARN),
     ("generic.chatml_token", inj.SEVERITY_BLOCK),
+    # Añadido el 2026-11-11: texto escrito con caracteres de etiqueta Unicode,
+    # que el modelo lee y un humano no ve. Medido ese día en es, eu, fr, se y
+    # uk: ningún fichero lleva uno. Los índices se reescanean (huella nueva).
+    ("generic.unicode_tag", inj.SEVERITY_BLOCK),
     ("tech.script_tag", inj.SEVERITY_BLOCK),
     ("tech.untrusted_escape", inj.SEVERITY_BLOCK),
     ("tech.html_comment", inj.SEVERITY_WARN),

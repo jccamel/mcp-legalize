@@ -244,7 +244,9 @@ cada resultado de búsqueda, y los códigos de país y los conteos en los listad
 así que se sanean antes de llegar al modelo. Se usa el mismo vocabulario que el
 análisis del cuerpo, que cubre seis idiomas (inglés, castellano, francés, alemán,
 portugués y sueco), más tres patrones exclusivos de los metadatos, deliberadamente
-más estrictos. Los caracteres invisibles se quitan antes de comparar, y la
+más estrictos. Los caracteres invisibles se quitan antes de comparar y de lo que
+se sirve —también los controles bidireccionales y los caracteres de etiqueta
+Unicode, que un modelo lee y una persona no ve—, y la
 comparación se repite sobre una copia normalizada con NFKC; cuando solo la
 normalización destapa un patrón, el valor se descarta entero en lugar de servirse
 alterado.
@@ -348,7 +350,8 @@ escribe en la misma transacción que las leyes que describe.
 
 - La inyección de instrucciones en texto plano en los seis idiomas que cubren
   los patrones, en el cuerpo y en los metadatos, incluidos los trucos con
-  caracteres invisibles y con NFKC.
+  caracteres invisibles y con NFKC. Un cuerpo con caracteres de etiqueta Unicode
+  va a cuarentena.
 - El recorrido de rutas y la revelación de ficheros mediante un índice
   manipulado: rutas absolutas, `..`, enlaces simbólicos que escapan, caracteres
   de control y una raíz del corpus que declara el propio índice.
