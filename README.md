@@ -240,7 +240,9 @@ search result, country codes and counts in the listings — so it is sanitised
 before it reaches the model. It uses the same vocabulary as the body scan, which
 covers six languages (English, Spanish, French, German, Portuguese and Swedish),
 plus three metadata-only patterns that are deliberately stricter. Invisible
-characters are removed before matching, and matching also runs on an
+characters are removed before matching and from what is served — including
+bidirectional controls and Unicode tag characters, which a model reads and a
+person cannot see — and matching also runs on an
 NFKC-normalised copy; when only normalisation reveals a pattern, the value is
 dropped whole rather than served altered.
 
@@ -336,7 +338,8 @@ it is written in the same transaction as the laws it describes.
 #### Covered
 
 - Plaintext prompt injection in the six languages the patterns cover, in both
-  the body and the metadata, including invisible-character and NFKC tricks.
+  the body and the metadata, including invisible-character and NFKC tricks. A
+  body with Unicode tag characters is quarantined.
 - Path traversal and file disclosure through a tampered index: absolute paths,
   `..`, escaping symlinks, control characters, and a corpus root the index
   declares for itself.
