@@ -353,21 +353,17 @@ def como_dict(ruta: Path) -> dict:
     """
     con = abrir(ruta)
     try:
+        # Quien llama aquí va a construir sobre lo que lee —el indexador— o a
+        # compararlo: un índice con filas manipuladas no es base para nada, y
+        # se dice con el mismo tipo de error que cualquier otro índice
+        # inservible, para que el indexador lo reconstruya desde el corpus.
+        if filas_ilegibles(con):
+            raise ValueError("fila_ilegible")
         meta = leer_meta(con)
         meta.pop("formato", None)
         documentos = {}
-        columnas = [c for c, _ in _CAMPOS_TEXTO]
-        for fila in con.execute(
-                f"SELECT id, {', '.join(columnas)}, bytes, mtime FROM leyes ORDER BY n"):
-            id_ley, *textos, bytes_, mtime = fila
-            entrada = {"identificador": id_ley}
-            for (col, clave), valor in zip(_CAMPOS_TEXTO, textos):
-                if col in _OPCIONALES and not valor:
-                    continue
-                entrada[clave] = valor
-            entrada["_archivo"] = Path(entrada["_ruta"]).name
-            entrada["_bytes"], entrada["_mtime"] = bytes_, mtime
-            documentos[id_ley] = entrada
+        for fila in con.execute(f"SELECT {', '.join(COLUMNAS_LEY)} FROM leyes ORDER BY n"):
+            documentos[fila[0]] = fila_a_doc(fila)
         meta["total_documentos"] = len(documentos)
         return {"_meta": meta, "documentos": documentos}
     finally:
@@ -454,11 +450,34 @@ def conteos_validos(valor) -> dict | None:
 COLUMNAS_LEY = ("id", *(c for c, _ in _CAMPOS_TEXTO), "bytes", "mtime")
 
 
+def filas_ilegibles(con: sqlite3.Connection) -> int:
+    """Cuántas leyes tienen un valor que no es texto en el id o en una columna de texto.
+
+    El esquema fija las columnas, no el tipo de cada valor: SQLite guarda el
+    tipo con el valor, y un fichero manipulado puede poner un blob donde va una
+    ruta. Un número no llega a verse: la afinidad de la columna lo guarda como
+    texto.
+    """
+    columnas = ("id", *(c for c, _ in _CAMPOS_TEXTO))
+    return con.execute(
+        "SELECT count(*) FROM leyes WHERE "
+        + " OR ".join(f"typeof({c}) != 'text'" for c in columnas)).fetchone()[0]
+
+
 def fila_a_doc(fila) -> dict:
-    """Una fila de `leyes` (en el orden de `COLUMNAS_LEY`) como la entrada del JSON."""
+    """Una fila de `leyes` (en el orden de `COLUMNAS_LEY`) como la entrada del JSON.
+
+    Un valor que no es texto en una columna de texto se sirve vacío: cuesta ese
+    campo de esa ley y nada más (ADR 0002). Antes una `ruta` guardada como blob
+    llegaba a `Path`, que lanzaba `TypeError`, y `buscar_ley` caía entera con
+    que la fila estuviera entre sus resultados. El servidor lo registra una vez
+    al cargar el índice, con `filas_ilegibles`.
+    """
     id_ley, *textos, bytes_, mtime = fila
     doc = {"identificador": id_ley}
     for (col, clave), valor in zip(_CAMPOS_TEXTO, textos):
+        if not isinstance(valor, str):
+            valor = ""
         if col in _OPCIONALES and not valor:
             continue
         doc[clave] = valor

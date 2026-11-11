@@ -183,3 +183,61 @@ def test_a_country_that_is_not_text_still_degrades(entorno):
     conexiones = cargar()
 
     assert len(conexiones) == 1
+
+
+# ───────────────────────── a path that is not text ───────────────────────────
+
+@pytest.fixture
+def con_ruta_blob(entorno):
+    """A row whose `ruta` is a blob, between two healthy ones.
+
+    `con_fila_corrupta` sets `ruta = 7`, and that proves nothing about the
+    path: the column has TEXT affinity, so SQLite stores the number as the text
+    `'7'`. A blob is the value that keeps its type. Found on 2026-11-11:
+    `fila_a_doc` handed it to `Path`, which raised `TypeError`, and every
+    search that reached the row fell with it.
+    """
+    ruta = escribir(entorno, "legalize-t", "t", {
+        "GOOD-1": {"titulo": "Ley buena", "rango": "ley", "_ruta": "a.md", "_bytes": 10},
+        "EVIL-1": {"titulo": "Ley hostil", "rango": "ley", "_ruta": "e.md", "_bytes": 5},
+        "GOOD-2": {"titulo": "Otra buena", "rango": "ley", "_ruta": "b.md", "_bytes": 20},
+    })
+    manipular(ruta, "UPDATE leyes SET ruta = x'6162' WHERE id = 'EVIL-1'")
+    return ruta
+
+
+def test_a_path_that_is_a_blob_costs_that_row_and_not_the_search(con_ruta_blob):
+    cargar()
+
+    assert [r.id for r in mcp_legalize.buscar_ley.fn(pais="t", limite=10)] == ["GOOD-1", "EVIL-1", "GOOD-2"]
+
+
+def test_a_law_whose_path_is_a_blob_is_served_without_text(con_ruta_blob):
+    """The path is what cannot be read, so the text is what is lost; the tool answers."""
+    cargar()
+
+    ley = mcp_legalize.obtener_ley.fn("EVIL-1", pais="t")
+
+    assert ley.id == "EVIL-1"
+    assert "Ley hostil" in ley.titulo
+
+
+def test_a_row_that_cannot_be_read_is_reported_once_when_loading(con_ruta_blob, capsys):
+    """A degradation must be on record (principle IV), and not once per query."""
+    cargar()
+    mcp_legalize.buscar_ley.fn(pais="t")
+    mcp_legalize.buscar_ley.fn(pais="t")
+
+    avisos = [linea for linea in capsys.readouterr().err.splitlines() if "no es texto" in linea]
+    assert len(avisos) == 1
+
+
+def test_the_indexer_does_not_build_on_an_index_with_a_row_it_cannot_read(con_ruta_blob):
+    """The indexer reads the index through `como_dict`, which raised `TypeError`.
+
+    Only `ValueError` makes it rebuild from the corpus; anything else aborted
+    the run, so a single crafted row left the operator without a way to
+    reindex. A tampered index is not a base to build on: it is rebuilt whole.
+    """
+    with pytest.raises(ValueError, match="fila_ilegible"):
+        legalize_indice.como_dict(con_ruta_blob)

@@ -363,6 +363,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         raiz = _raiz_del_corpus(meta, autorizada)
         total = con.execute("SELECT count(*) FROM leyes").fetchone()[0]
     except ValueError as exc:
+        ilegibles = legalize_indice.filas_ilegibles(con)
         print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.", file=sys.stderr)
         con.close()
         return
@@ -372,6 +373,14 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         return
 
     # Los conteos de los listados se usan solo si tienen la forma que escribe
+    # Una fila con un valor que no es texto donde va texto se sirve con ese
+    # campo vacío (`legalize_indice.fila_a_doc`). Queda dicho aquí, una vez por
+    # índice y no una por consulta, que llenaría el registro.
+    if ilegibles:
+        print(f"[AVISO] {index_path.name!r}: {ilegibles:,} fila(s) con un valor que no es "
+              f"texto; se sirven con ese campo vacío. Regenera el índice con update_index.py.",
+              file=sys.stderr)
+
     # el indexador; si no, `_conteos` los calcula la primera vez.
     meta["conteos"] = legalize_indice.conteos_validos(meta.get("conteos"))
     _CONEXIONES[pais_code] = con
