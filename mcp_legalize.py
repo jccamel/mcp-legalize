@@ -29,6 +29,7 @@ import os
 import re
 import sqlite3
 import sys
+from itertools import islice
 from pathlib import Path
 from typing import Optional
 
@@ -362,8 +363,8 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
                      or _sanitize_metadata(index_path.stem.replace("index_", ""), max_len=50))
         raiz = _raiz_del_corpus(meta, autorizada)
         total = con.execute("SELECT count(*) FROM leyes").fetchone()[0]
-    except ValueError as exc:
         ilegibles = legalize_indice.filas_ilegibles(con)
+    except ValueError as exc:
         print(f"[SEGURIDAD] {index_path.name!r}: {exc}; índice ignorado.", file=sys.stderr)
         con.close()
         return
@@ -372,7 +373,6 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         con.close()
         return
 
-    # Los conteos de los listados se usan solo si tienen la forma que escribe
     # Una fila con un valor que no es texto donde va texto se sirve con ese
     # campo vacío (`legalize_indice.fila_a_doc`). Queda dicho aquí, una vez por
     # índice y no una por consulta, que llenaría el registro.
@@ -381,6 +381,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
               f"texto; se sirven con ese campo vacío. Regenera el índice con update_index.py.",
               file=sys.stderr)
 
+    # Los conteos de los listados se usan solo si tienen la forma que escribe
     # el indexador; si no, `_conteos` los calcula la primera vez.
     meta["conteos"] = legalize_indice.conteos_validos(meta.get("conteos"))
     _CONEXIONES[pais_code] = con
@@ -424,7 +425,13 @@ _UNTRUSTED_CLOSE_RE = re.compile(
 _SUSPICIOUS_ENCODING_PATTERNS = [
     # Base64: bloques largos con padding obligatorio (>= 60 chars + "=" final).
     # Un texto legal legítimo raramente contiene esto.
-    (re.compile(r"[A-Za-z0-9+/]{60,}={1,2}"), "base64_block"),
+    #
+    # Solo puede empezar al principio de una tirada, nunca en mitad. Sin esa
+    # condición cada carácter de una tirada sin "=" era un intento nuevo que la
+    # recorría hasta el final y volvía: coste cuadrático. Medido el 2026-11-11,
+    # 20.000 letras tardaban 1,17 s y los 80.000 caracteres que `obtener_ley`
+    # sirve por defecto unos 19 s, en cada llamada, con un solo fichero hostil.
+    (re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{60,}={1,2}"), "base64_block"),
     # Secuencias de hex escapes consecutivos (4+) — patrón típico de payloads ofuscados.
     # Un hex aislado no es sospechoso; una cadena larga sí.
     (re.compile(r"(?:\\x[0-9a-f]{2}){4,}", re.IGNORECASE), "hex_escape_sequence"),
@@ -443,8 +450,9 @@ def _check_suspicious_encoding(texto: str, doc_id: str = "") -> list[str]:
     """
     findings = []
     for pattern, encoding_type in _SUSPICIOUS_ENCODING_PATTERNS:
-        matches = list(pattern.finditer(texto))[:_MAX_ENCODING_MATCHES_PER_PATTERN]
-        for match in matches:
+        # `islice` y no una lista recortada: la lista buscaba todas las
+        # coincidencias del texto antes de quedarse con tres.
+        for match in islice(pattern.finditer(texto), _MAX_ENCODING_MATCHES_PER_PATTERN):
             findings.append(encoding_type)
             raw = match.group()
             snippet = raw[:40] + ("..." if len(raw) > 40 else "")
