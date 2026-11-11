@@ -144,7 +144,13 @@ PATTERNS: list[InjectionPattern] = [
     # suelto, y era la única línea con un prefijo de rol en es, eu, fr y se
     # (unas 53.000 leyes, medido el 2026-10-19); por ella se perdía la ley.
     _pat("generic.role_prefix", SEVERITY_BLOCK, ("system", "assistant", "user", "human"),
-         r"^\s*(SYSTEM|ASSISTANT|USER|HUMAN)\s*:[ \t]*\S",
+         #
+         # El espacio inicial no cruza líneas (`[^\S\n]` y no `\s`). Con `\s`
+         # la coincidencia podía empezar en cualquier línea en blanco anterior,
+         # y sobre una tirada de líneas en blanco sin prefijo detrás cada línea
+         # era un intento que la recorría entera: coste cuadrático. Medido el
+         # 2026-11-11, 20.000 líneas vacías y la palabra `user` tardaban 6,6 s.
+         r"^[^\S\n]*(SYSTEM|ASSISTANT|USER|HUMAN)\s*:[ \t]*\S",
          # La muestra pone el prefijo en la SEGUNDA linea a proposito. Con el
          # rol en la primera, `^` coincide con o sin MULTILINE y la muestra deja
          # de probar el único flag que este patrón necesita: la comprobación
