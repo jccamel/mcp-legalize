@@ -600,6 +600,9 @@ def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
     metadatos: dict[str, list[str]] = {}
     # Ficheros con algún valor de frontmatter por encima de `_MAX_META_CHARS`.
     truncados: dict[str, list[str]] = {}
+    # Ids de entradas huérfanas que ha ocupado un fichero que los declara: el
+    # mismo fichero en otro directorio. Ya no son huérfanas.
+    movidos: set[str] = set()
     progreso = _Progress(len(pendientes), sum(md_stats[r].size for r in pendientes))
 
     for rel in pendientes:
@@ -661,10 +664,22 @@ def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
         # que es única por construcción. Descartarlo sería perder una ley por
         # culpa de otra; renombrarlas a ambas rompería el id con el que un
         # cliente vuelve a un documento que hoy resuelve bien.
-        if doc_id in documentos and documentos[doc_id].get("_ruta") != rel:
-            duplicados[rel] = doc_id
-            doc_id = f"{doc_id}__{rel.replace('/', '_').removesuffix('.md')}"
-            entry["identificador"] = doc_id
+        #
+        # Solo reclama el id una entrada cuyo fichero sigue en disco. Un fichero
+        # movido a otro directorio es una ruta nueva, y la entrada de su ruta
+        # vieja aún tenía el id: se tomaba por un duplicado de sí mismo y se
+        # indexaba como `LEY-1__b_ley1`, y con --remove-orphans la entrada vieja
+        # se iba también. Reorganizar los directorios del corpus cambiaba todos
+        # los ids (#67). Ahora el fichero ocupa el sitio de esa entrada, que ya
+        # no es huérfana.
+        previa = documentos.get(doc_id)
+        if previa is not None and previa.get("_ruta") != rel:
+            if previa.get("_ruta") in md_files:
+                duplicados[rel] = doc_id
+                doc_id = f"{doc_id}__{rel.replace('/', '_').removesuffix('.md')}"
+                entry["identificador"] = doc_id
+            else:
+                movidos.add(doc_id)
 
         documentos[doc_id] = entry
         # El cuerpo se escribe AQUÍ y no al construir la entrada: aquí el
@@ -676,6 +691,11 @@ def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
         escritor.poner_ley(doc_id, entry, cuerpo)
 
     progreso.cerrar()
+    # El recuento de huérfanos se imprime antes de escanear, cuando aún no se
+    # sabe qué id declara cada fichero nuevo: aquí se dice cuántos eran el
+    # mismo fichero en otro directorio.
+    if movidos:
+        print(f"Movidos           : {len(movidos):,} (huérfanos que conservan su id en su nueva ruta)")
 
     if truncados:
         print(
@@ -732,7 +752,8 @@ def _pasada(args, repo_dir: Path, fallback_pais: str, index_path: Path,
 
     if args.remove_orphans:
         for doc_id in huerfanos:
-            quitar(doc_id)
+            if doc_id not in movidos:
+                quitar(doc_id)
 
     try:
         base_dir_str = repo_dir.relative_to(_PROJECT_DIR).as_posix()
