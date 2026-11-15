@@ -20,6 +20,9 @@ Las normas de trabajo de este repositorio están en `CONTRIBUTING.md` y mandan s
 - `legalize_injection.py` — único vocabulario de prompt injection (cuerpo y metadatos)
 - `legalize_frontmatter.py` — única regla de dónde acaba el frontmatter
 - `legalize_tokenizer.py` — única regla de qué es un término (búsqueda a texto completo)
+- `legalize_normalizacion.py` — única regla de cómo se pliega el texto para comparar
+- `legalize_articulos.py` — única regla de qué es un artículo y dónde empieza y acaba
+- `legalize_indice.py` — único sitio que conoce el esquema del índice: lo escribe, lo abre como entrada no confiable y construye los filtros
 - `legalize_repo.py` — qué commit identifica a un corpus
 - `legalize_estado.py` — única regla de cuándo el título de una ley contradice a su estado
 - `scripts/` — indexador (`update_index.py`) y comprobación de frescura (`check_updates.py`)
