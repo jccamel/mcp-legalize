@@ -1298,7 +1298,9 @@ def buscar_ley(
       demás y no se interpreta como sintaxis: comillas, AND o * son texto.
     - pais: código ISO (es, se, at, de, fr…).
     - rango: tipo de norma (ley, forordning, Verordnung…).
-    - estado: in_force, repealed, partially_repealed, annulled, expired.
+    - estado: in_force, repealed, partially_repealed, annulled, expired. Es el
+      valor entero, sin distinguir mayúsculas: `repealed` no incluye
+      `partially_repealed`.
       `repealed` incluye las leyes con `aviso_estado` (su título dice que se
       derogaron), y `in_force` no las incluye.
     - anno: año exacto de publicación (e.g. "2001").
