@@ -46,8 +46,10 @@ import legalize_normalizacion
 # estado (spec 004). Lleva la huella de esa regla porque decide qué devuelve el
 # filtro de estado: un índice archivado con otra daría resultados que no
 # corresponden, sin avisar, y así se reconstruye sin que nadie tenga que
-# acordarse de subir el número (principio VII).
-FORMATO = "3." + legalize_estado.huella()
+# acordarse de subir el número (principio VII). Lleva también la de las
+# reglas de artículos por el mismo motivo: los números y las posiciones de
+# `articulos` son los que esas reglas dieron (#72).
+FORMATO = "3." + legalize_estado.huella() + "." + legalize_articulos.huella()
 
 # El esquema canónico. Es también la lista blanca de `abrir`: el SQL de cada
 # objeto propio debe coincidir carácter a carácter.

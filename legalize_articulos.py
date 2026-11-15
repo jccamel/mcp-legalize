@@ -23,6 +23,7 @@ el artículo acaba en el siguiente encabezado de su nivel o de uno superior, o
 en el siguiente artículo: nunca en una remisión.
 """
 
+import hashlib
 import re
 
 ENCABEZADO_RE = re.compile(r"^(#{1,6})[ \t]+(.*)$", re.MULTILINE)
@@ -39,18 +40,34 @@ ENCABEZADO_RE = re.compile(r"^(#{1,6})[ \t]+(.*)$", re.MULTILINE)
 # franceses (`L`, `R`, `D`, `A`, `LO`, `R*`).
 CUALQUIER_NUMERO = r"[A-Za-z]{0,2}\*?\d[\w*-]*"
 
+# Los artículos intercalados llevan un adverbio multiplicativo latino tras el
+# número (`Artículo 3 bis`), y ese sufijo es parte del número: el número
+# capturado se paraba en los dígitos, así que el 3 bis se guardaba como un
+# segundo artículo 3, y pedir el 3 sin índice devolvía el 3 bis si iba antes
+# (#72). Medido el 2026-11-15 en los encabezados de artículo de los corpus
+# locales: en es, `bis` 3.172 (1.138 leyes), `ter` 931, `quater`/`quáter` 461 y
+# así hasta `duovicies`; en fr, 2.100 encabezados en 16 leyes; ninguno en eu ni
+# en se. Las decenas se componen: `un`/`duo`/…/`novo` + `decies`/`vicies`.
+SUFIJO_LATINO = (r"(?:bis|ter|qu[aá]ter|quinquies|sext?ies|septies|octies|nonies"
+                 r"|(?:un|duo|ter|qu[aá]ter|quin|sex|sept|octo|novo)?(?:decies|vicies))")
+_SUFIJO = rf"[ \t]+(?i:{SUFIJO_LATINO})(?![\w*-])"
+
+# Tras el número no sigue nada que lo continúe (ver arriba) ni un sufijo
+# latino: `3` no es el encabezado de `3 bis`.
+_FIN = rf"(?![\w*-])(?!{_SUFIJO})"
+
 # Formas del TEXTO de un encabezado que lo identifican como el artículo `term`.
 # Medidas en `legalize-es`: `Artículo N.`, `Art. N.`, `ARTÍCULO N`, `**Artículo
 # N.**`; en `legalize-se`: `N §`.
 ARTICULO_EN_ENCABEZADO_TEMPLATE = [
     # Español / portugués: "Artículo 3", "ARTÍCULO 3", "Art. 3", "**Artículo 3.**"
-    r"(?i)^\**\s*(?:art[ií]culo|art\.)\s*{term}(?![\w*-])",
+    r"(?i)^\**\s*(?:art[ií]culo|art\.)\s*{term}" + _FIN,
     # Francés: "Article L135", "Article 3"
-    r"(?i)^\**\s*article\s+{term}(?![\w*-])",
+    r"(?i)^\**\s*article\s+{term}" + _FIN,
     # Sueco: "3 §" (número ANTES del §)
     r"^{term}\s*§",
     # Alemán / austriaco moderno: "§ 3" (§ ANTES del número)
-    r"^§\s*{term}(?![\w*-])",
+    r"^§\s*{term}" + _FIN,
     # Austriaco antiguo: "§. 3."
     r"^§\.\s*{term}\.",
 ]
@@ -61,7 +78,7 @@ ARTICULO_EN_ENCABEZADO_TEMPLATE = [
 # pide: con `term="1 a"` la plantilla de arriba encaja con ese encabezado.
 _NUMERO_SUECO = r"\d+(?: ?[a-z])?"
 _CAPTURAS = [
-    re.compile(tpl.format(term=f"(?P<n>{_NUMERO_SUECO if '§' in tpl and tpl.startswith('^{term}') else CUALQUIER_NUMERO})"))
+    re.compile(tpl.format(term=f"(?P<n>{_NUMERO_SUECO if '§' in tpl and tpl.startswith('^{term}') else CUALQUIER_NUMERO + f'(?:{_SUFIJO})?'})"))
     for tpl in ARTICULO_EN_ENCABEZADO_TEMPLATE
 ]
 _OTRO_ARTICULO = [re.compile(tpl.format(term=CUALQUIER_NUMERO)) for tpl in ARTICULO_EN_ENCABEZADO_TEMPLATE]
@@ -71,10 +88,10 @@ _OTRO_ARTICULO = [re.compile(tpl.format(term=CUALQUIER_NUMERO)) for tpl in ARTIC
 # no una remisión. Lo que solo aparece en mitad de la prosa ya no se devuelve:
 # "artículo no encontrado" es mejor respuesta que una frase presentada como ley.
 ARTICULO_EN_LINEA_TEMPLATE = [
-    r"(?im)^[ \t]*\**[ \t]*(?:art[ií]culo|art\.)[ \t]*{term}(?![\w*-])",
-    r"(?im)^[ \t]*Article[ \t]+{term}(?![\w*-])",
+    r"(?im)^[ \t]*\**[ \t]*(?:art[ií]culo|art\.)[ \t]*{term}" + _FIN,
+    r"(?im)^[ \t]*Article[ \t]+{term}" + _FIN,
     r"(?im)^{term}[ \t]*§",
-    r"(?im)^[ \t]*§[ \t]*{term}(?![\w*-])",
+    r"(?im)^[ \t]*§[ \t]*{term}" + _FIN,
     r"(?im)^§\.[ \t]*{term}\.",
     # Número solo en su línea (último recurso)
     r"(?im)^{term}[ \t]*$",
@@ -203,8 +220,24 @@ def _numero(texto_encabezado: str) -> str | None:
     for captura in _CAPTURAS:
         m = captura.search(texto)
         if m:
-            return m.group("n")
+            # `3  bis` y `3\tbis` son el `3 bis` que pide el cliente.
+            return " ".join(m.group("n").split())
     return None
+
+
+def huella() -> str:
+    """Huella de las reglas: identifica con cuáles se localizaron los artículos de un índice.
+
+    Entra en el formato del índice (`legalize_indice.FORMATO`), como la de la
+    regla de estado: las posiciones y los números guardados son los de las
+    reglas con que se calcularon, y con otras `obtener_articulo` serviría
+    trozos que no corresponden, sin avisar. Se lee del contenido de las
+    reglas, así que nadie tiene que acordarse de subir un número.
+    """
+    partes = [CUALQUIER_NUMERO, SUFIJO_LATINO, _NUMERO_SUECO, _NUMERO_SUELTO.pattern,
+              ENCABEZADO_RE.pattern, NEXT_SECTION_RE.pattern, SEPARADOR_UBICACION,
+              *ARTICULO_EN_ENCABEZADO_TEMPLATE, *ARTICULO_EN_LINEA_TEMPLATE]
+    return hashlib.sha256("\x00".join(partes).encode("utf-8")).hexdigest()[:12]
 
 
 def localizar_todos(cuerpo: str) -> list[tuple[int, str, str, int, int, int, bool]]:

@@ -109,7 +109,7 @@ def test_without_headings_a_prefix_is_not_found_either(ley):
 
 @pytest.mark.parametrize("cuerpo,numero,esperado", [
     ("###### Artículo 7. Naturaleza.\n\nSiete.\n", "7", "Siete."),
-    ("###### Artículo 1 bis.\n\nUno bis.\n", "1", "Uno bis."),
+    ("###### Artículo 1 bis.\n\nUno bis.\n", "1 bis", "Uno bis."),  # #72: el sufijo es parte del número
     ("##### 3 §\n\nTredje.\n", "3", "Tredje."),
     ("##### § 4\n\nVierter.\n", "4", "Vierter."),
 ])
