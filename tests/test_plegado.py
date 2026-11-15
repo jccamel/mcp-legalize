@@ -58,10 +58,11 @@ def test_what_was_already_folded_folds_the_same(palabra, termino):
     assert tk.tokens(palabra) == ({termino} if termino else set())
 
 
-def test_ordinals_and_ligatures_are_left_as_they_are():
-    """Canonical decomposition only: `1º` and `ﬁ` are not diacritics."""
-    assert ln.normalizar("1º") == "1º"
-    assert ln.normalizar("ﬁn") == "ﬁn"
+def test_ordinals_and_ligatures_fold_to_their_base():
+    """Compatibility decomposition since ADR 0013: left as they were, `1º` and
+    `ﬁ` were one term in the index that the query could not produce (#74)."""
+    assert ln.normalizar("1º") == "1o"
+    assert ln.normalizar("ﬁn") == "fin"
 
 
 def test_title_search_folds_the_same_way(instalar_corpus, monkeypatch):

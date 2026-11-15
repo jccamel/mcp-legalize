@@ -79,7 +79,8 @@ the same interpreter and script.
 
 Full-text search folds diacritics (`forêt` = `foret`) and keeps `ñ` as a letter
 (`año` ≠ `ano`). Greek and Cyrillic are searchable too, folded the same way and
-keeping `й`, `ї` and `ў` as letters (`йод` ≠ `иод`). In `texto`, words under three characters are ignored; in a
+keeping `й`, `ї` and `ў` as letters (`йод` ≠ `иод`). Ordinals, superscripts,
+subscripts and ligatures fold to their base (`co₂` = `co2`, `ﬁ` = `fi`). In `texto`, words under three characters are ignored; in a
 `frase` they count, so `"ley de 1978"` requires the `de`. Anything a client
 writes is searched as text: quotes, `AND`, `NEAR` or `*` are never read as
 search syntax.
