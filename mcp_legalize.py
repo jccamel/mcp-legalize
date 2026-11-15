@@ -702,6 +702,30 @@ def _motivo_sin_texto(pais: str) -> str | None:
     return _TEXTO_NO_DISPONIBLE.get(pais)
 
 
+def _pais_pedido(pais: str) -> "tuple[str, ErrorRespuesta | None]":
+    """El código de país que pide el cliente, tal como está guardado, o el error.
+
+    Devuelve `("", None)` si no pide ninguno: la consulta recorre todos. Un
+    código que no corresponde a ningún índice es un error con los que sí hay,
+    nunca "todos los países": `estadisticas(pais="zz")` devolvía las cifras del
+    corpus entero, y `obtener_ley` y `obtener_articulo` buscaban en todos, así
+    que quien se equivocaba al escribir recibía la respuesta a otra pregunta
+    sin nada que se lo dijera (#69, principio IV).
+
+    Es el único sitio que lo decide: las seis herramientas que aceptan `pais`
+    pasan por aquí, con el mismo mensaje (principio III).
+    """
+    pedido = pais if isinstance(pais, str) else ""
+    if not pedido:
+        return "", None
+    if pedido in _CONEXIONES:
+        return pedido, None
+    return "", ErrorRespuesta(
+        error=f"País '{_sanitize_metadata(pedido, max_len=50)}' no reconocido.",
+        sugerencias=list(_CONEXIONES),
+    )
+
+
 def _paises(pais: str = "") -> list[str]:
     """Los países que recorre una consulta, en el orden de los ficheros de índice."""
     return [pais] if pais and pais in _CONEXIONES else list(_CONEXIONES)
@@ -812,6 +836,10 @@ países pedidos, devuelve un error en lugar de una lista vacía.
 Errores: cuando una herramienta no puede devolver nada, responde con
 ErrorRespuesta {error, sugerencias?}. `sugerencias` viene rellena cuando hay
 alternativas concretas — un id ambiguo devuelve ahí las leyes que coinciden.
+
+País: un `pais` que no corresponde a ningún índice es un error en todas las
+herramientas, con los códigos disponibles en `sugerencias`; nunca se responde
+con todos los países en su lugar.
 
 La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
@@ -1038,8 +1066,9 @@ def buscar_ley(
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
-    if pais and pais not in _CONEXIONES:
-        return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' no reconocido.", sugerencias=list(_CONEXIONES.keys()))
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
 
     limite = min(max(1, limite), MAX_LIMIT)
 
@@ -1103,9 +1132,9 @@ def contar_leyes(
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
-    if pais and pais not in _CONEXIONES:
-        return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' no reconocido.",
-                              sugerencias=list(_CONEXIONES.keys()))
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
 
     # Mismo generador que `buscar_ley`, para que el conteo no pueda describir
     # una consulta distinta de la que el cliente va a ejecutar después.
@@ -1128,6 +1157,9 @@ def contar_leyes(
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
 
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
     if err:
         return err
@@ -1211,6 +1243,9 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
     found_pais, found_id, found_doc, err = _resolve_ley(id_ley, pais)
     if err:
         return err
@@ -1310,13 +1345,18 @@ def _conteos(pais: str, nombre: str) -> dict:
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
-    if pais and pais not in _CONEXIONES: return ErrorRespuesta(error=f"País '{_sanitize_metadata(pais, max_len=50)}' desconocido")
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
     conteo = _conteos(pais, "rangos")
     return [RangoConteo(rango=r, total=c) for r, c in sorted(conteo.items(), key=lambda x: -x[1])]
 
 @mcp.tool()
 def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
+    pais, error_pais = _pais_pedido(pais)
+    if error_pais:
+        return error_pais
     estados = _conteos(pais, "estados")
     rangos = _conteos(pais, "rangos")
     annos = _conteos(pais, "annos")
