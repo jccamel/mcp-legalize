@@ -9,7 +9,8 @@ Permite consultar cualquier país siempre que esté clonado su
 repositorio bajo el estándar SPEC.md e indexado.
 
 Configuración (variables de entorno):
-  LEGALIZE_INDICES_DIR       — directorio con los índices .json (default: <script_dir>/indices)
+  LEGALIZE_INDICES_DIR       — directorio con los índices, una base de datos `index_<repo>.db`
+                               por corpus (default: <script_dir>/indices)
   LEGALIZE_REPOS_DIR         — único directorio desde el que se leen documentos
                                (default: <script_dir>/repos). Un índice cuyo corpus
                                queda fuera de él no se sirve: el índice elige dentro,

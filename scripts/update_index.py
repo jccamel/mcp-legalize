@@ -231,7 +231,7 @@ def _fecha_valida(valor) -> str:
     return valor.strip()
 
 
-def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding]]:
+def _build_entry(md_path: Path, stat: _StatInfo, base_dir: Path, fallback_pais: str) -> tuple[str, dict, list[_Finding], list[str], list[str], str]:
     """Construye una entrada de índice para un documento .md.
 
     Devuelve (doc_id, entry_dict, hallazgos_en_cuerpo, hallazgos_en_metadatos,
@@ -537,7 +537,6 @@ def main() -> None:
 
     nuevos = []
     actualizados = []
-    renombrados = []
     docids_validos = set()
 
     for rel, md_path in md_files.items():
