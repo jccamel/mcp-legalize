@@ -181,7 +181,9 @@ with no flags:
 | `RAÍZ` | The index places its corpus outside `LEGALIZE_REPOS_DIR`. Nothing is checked there — not even git is run |
 
 Every run writes into a copy of the index and swaps it in whole, so an
-interrupted run leaves the previous index untouched. When an update changes the
+interrupted run leaves the previous index untouched. A running server notices
+the swap on its next call and serves the new index, as a restart would; a new
+corpus still needs a restart. When an update changes the
 index format, `check_updates.py` reports every corpus as `FORMATO` and the
 server stops serving them: reindex each one before restarting it. A corpus whose
 `.legalize.yml` declares a `spec_version` newer than the one implemented (0.4),
