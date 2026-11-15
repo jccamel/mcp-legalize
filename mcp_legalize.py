@@ -966,6 +966,10 @@ cambiado desde que se indexó", si el fichero cambió después de indexarse: no 
 sirve sin haber pasado por el análisis de seguridad. `solo_metadata=True` sigue
 devolviendo los metadatos.
 
+Longitud de un artículo: obtener_articulo devuelve el encabezado entero y como
+mucho `contexto_chars` caracteres después, tenga el artículo final marcado o no.
+Si se cortó, `texto_truncado` es true y `chars_totales` dice cuánto mide.
+
 Números repetidos: hay leyes que reinician la numeración en cada capítulo (los
 códigos suecos repiten `1 §`). obtener_articulo devuelve la primera aparición y,
 si hay más, las lista en `ubicaciones`. Para obtener otra, repite la llamada con
@@ -1427,7 +1431,10 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             localizado = None
             if elegida is not None:
                 _, inicio, fin_encabezado, fin, abierto = apariciones[elegida]
-                corte = min(fin_encabezado + contexto_chars, len(content)) if abierto else fin
+                # La regla de `legalize_articulos.localizar`, abierto o no: el
+                # encabezado entero y `contexto_chars` después (#76). En uno
+                # abierto `fin` es el final del cuerpo, como antes.
+                corte = min(fin_encabezado + contexto_chars, fin)
                 localizado = (inicio, corte, fin)
                 ubicacion = nombres[elegida] or None
         elif capitulo_clean:

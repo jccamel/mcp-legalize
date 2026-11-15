@@ -69,20 +69,20 @@ def test_raising_the_limit_returns_the_whole_article(ley):
 def test_an_article_that_ends_at_a_heading_is_complete(ley):
     cuerpo = "##### 1 §\n\nFörsta.\n\n##### 2 §\n\nAndra.\n"
 
-    resultado = ley(cuerpo, "1", contexto_chars=5)
+    resultado = ley(cuerpo, "1", contexto_chars=100)
 
     assert resultado.texto_truncado is False
     assert contenido(resultado) == "##### 1 §\n\nFörsta."
 
 
-def test_an_article_longer_than_the_limit_but_with_an_end_is_not_cut(ley):
-    """The limit only applies when the document gives no end; it was never a cap."""
+def test_an_article_longer_than_the_limit_is_cut_even_with_an_end(ley):
+    """The limit applies to every article since #76, closed or not."""
     cuerpo = "##### 1 §\n\n" + ANEXO + "\n\n##### 2 §\n\nAndra.\n"
 
     resultado = ley(cuerpo, "1", contexto_chars=100)
 
-    assert resultado.texto_truncado is False
-    assert ANEXO.strip() in contenido(resultado)
+    assert resultado.texto_truncado is True
+    assert "Andra" not in contenido(resultado)
 
 
 def test_the_last_article_of_a_short_document_is_complete(ley):

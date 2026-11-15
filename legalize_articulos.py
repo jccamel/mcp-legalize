@@ -154,9 +154,13 @@ def localizar(content: str, articulo: str, contexto_chars: int) -> tuple[int, in
     """`(inicio, fin, fin_real)` del artículo en `content`, o None si no se encuentra.
 
     `fin_real` es donde acaba el artículo según el documento; `fin`, donde se
-    corta lo que se devuelve. Solo difieren cuando nada marca el final y se
-    aplica `contexto_chars`: entonces el artículo llega hasta el final del
-    documento y lo devuelto es un trozo. Quien llama lo usa para decirlo.
+    corta lo que se devuelve: `contexto_chars` caracteres después del final
+    del encabezado, que siempre va entero. Difieren cuando el artículo es más
+    largo, esté cerrado por el siguiente encabezado o llegue hasta el final del
+    documento, y quien llama lo usa para decirlo. Antes el límite solo se
+    aplicaba al artículo sin final marcado, y uno cerrado salía entero aunque
+    se pidieran 2.000 caracteres: medido el 2026-11-15, 100 artículos reales
+    superaban los 80.000 por defecto, el mayor con 728.069 (#76).
 
     Primero entre los encabezados Markdown, en orden de documento: el artículo
     acaba en el siguiente encabezado de igual o menor número de `#`, es decir,
@@ -182,17 +186,15 @@ def localizar(content: str, articulo: str, contexto_chars: int) -> tuple[int, in
                 None,
             )
             inicio = _inicio(encabezados, i, sueltos)
-            if siguiente:
-                return inicio, siguiente.start(), siguiente.start()
-            return inicio, min(enc.end() + contexto_chars, len(content)), len(content)
+            fin_real = siguiente.start() if siguiente else len(content)
+            return inicio, min(enc.end() + contexto_chars, fin_real), fin_real
 
     for tpl in ARTICULO_EN_LINEA_TEMPLATE:
         m = re.search(tpl.format(term=term), content)
         if m:
             siguiente = NEXT_SECTION_RE.search(content, m.end())
-            if siguiente:
-                return m.start(), siguiente.start(), siguiente.start()
-            return m.start(), min(m.end() + contexto_chars, len(content)), len(content)
+            fin_real = siguiente.start() if siguiente else len(content)
+            return m.start(), min(m.end() + contexto_chars, fin_real), fin_real
     return None
 
 
