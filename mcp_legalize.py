@@ -1195,6 +1195,11 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     _SECURITY_LOGGER.debug(
         "DOCUMENT_ACCESS | id=%s | country=%s | full_text=%s",
         found_id, found_pais, not solo_metadata,
+    # Por debajo de cero es cero, como `limite` en `buscar_ley`. El valor iba
+    # tal cual al corte, y en Python un límite negativo cuenta desde el final:
+    # `max_chars=-5` devolvía la ley sin sus cinco últimos caracteres y decía
+    # `chars_devueltos=-5` (#73).
+    max_chars = max(0, max_chars)
     )
 
     return resultado
@@ -1281,6 +1286,9 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             # El servidor no interpreta nombres de capítulo: compara con las
             # ubicaciones que él mismo devuelve, ya saneadas, porque son las
             # únicas que el cliente ha podido ver.
+    # Por debajo de cero es cero, igual que `max_chars`: un valor negativo
+    # ponía el final de un artículo abierto antes de su encabezado (#73).
+    contexto_chars = max(0, contexto_chars)
             nombres = [_sanitize_metadata(u) for u, *_ in apariciones]
             elegida = nombres.index(capitulo_clean) if capitulo_clean in nombres else (
                 None if capitulo_clean else 0)
