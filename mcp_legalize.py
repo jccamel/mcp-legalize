@@ -541,8 +541,17 @@ def _wrap_untrusted(texto: str, doc: dict, pais: str) -> str:
     Defensas aplicadas:
     - Neutralización de intentos de cerrar el tag desde el contenido.
     - Sanitización de atributos (fuente, país) frente a inyección de atributos.
+
+    `fuente` pasa primero por `_sanitize_metadata`, la misma regla que el
+    campo `fuente` de la respuesta, y después por `_sanitize_attr`, que solo
+    cuida de que no se salga del atributo. Con `_sanitize_attr` a secas
+    pasaban los caracteres de etiqueta Unicode —invisibles para una persona,
+    legibles para el modelo—, los controles bidireccionales y el vocabulario
+    de inyección: un `source:` hostil ponía texto del atacante en la etiqueta
+    que marca dónde empieza lo no confiable (GHSA-g49g-mfc3-x7px).
+    `pais` ya llega saneado: es el código con que se registró el índice.
     """
-    fuente = _sanitize_attr(doc.get("fuente", ""))
+    fuente = _sanitize_attr(_sanitize_metadata(doc.get("fuente", ""), max_len=500))
     pais_safe = _sanitize_attr(pais)
     texto_safe = _neutralize_delimiter(texto)
     return (
