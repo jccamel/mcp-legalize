@@ -844,6 +844,22 @@ def _paises(pais: str = "") -> list[str]:
     return [pais] if pais and pais in _CONEXIONES else list(_CONEXIONES)
 
 
+def _id_pedido(id_ley) -> str:
+    """Un id tal como se compara: sin espacios alrededor ni `.md` final."""
+    pedido = id_ley.strip() if isinstance(id_ley, str) else ""
+    if pedido.casefold().endswith(".md"):
+        pedido = pedido[:-3]
+    return pedido
+
+
+def _filas_por_numero(con, numeros) -> list:
+    if not numeros:
+        return []
+    return con.execute(
+        f"{_SELECT_LEY} WHERE n IN ({', '.join('?' * len(numeros))}) ORDER BY n",
+        numeros).fetchall()
+
+
 def _resolve_ley(id_ley: str, pais: str = ""):
     """Resuelve un id (exacto o parcial) a (pais_code, doc_id, doc_dict, None).
 
@@ -852,67 +868,70 @@ def _resolve_ley(id_ley: str, pais: str = ""):
     cada llamador tenga que envolver a su manera.
 
     Las coincidencias de una ambigüedad van en `sugerencias`, que es el campo
-    que existe para eso. Antes se formateaban dentro del mensaje como un repr de
-    lista de Python, así que un cliente que quisiera ofrecerlas tenía que volver
-    a parsear la prosa. Y son IDs del corpus, es decir texto no confiable: pasan
+    que existe para eso. Son IDs del corpus, es decir texto no confiable: pasan
     por _sanitize_metadata igual que cualquier otro metadato que llega al LLM.
 
-    La comparación no distingue mayúsculas, pero lo que se devuelve es siempre
-    la clave guardada. Antes se pasaba la petición a mayúsculas y se buscaba tal
-    cual, mientras el indexador guarda los ids como vienen: 245 leyes españolas
-    (`BOJA-b-…`), 44 suecas (`SFS-1827-60s.1007`) y todo id numérico, que lleva
-    el prefijo del país en minúsculas, aparecían en `buscar_ley` y no había
-    forma de abrirlas. Medido el 2026-10-18; en ninguno de los dos corpus hay
-    dos ids que solo se distingan por mayúsculas.
+    Se resuelve por fases, cada una sobre todos los países pedidos, y una fase
+    solo cede a la siguiente si no encuentra nada:
 
-    Aun así, una coincidencia exacta gana primero, y dos claves que empatan al
-    ignorar mayúsculas son una ambigüedad: elegir una en silencio serviría una
-    ley que el cliente no nombró.
+    1. el id exacto;
+    2. sin distinguir mayúsculas. El indexador guarda los ids como vienen:
+       245 leyes españolas (`BOJA-b-…`), 44 suecas (`SFS-1827-60s.1007`) y todo
+       id numérico, que lleva el prefijo del país en minúsculas (medido el
+       2026-10-18);
+    3. una parte del id.
+
+    Antes se recorría país a país con las tres comparaciones, así que la
+    respuesta dependía de qué países se buscaban (#75): un acierto parcial en
+    el primero ganaba a un id exacto en el segundo, y un id que coincidía con
+    varias leyes era ambiguo con `pais` y "no encontrada" sin él. Ahora más de
+    una coincidencia en una fase es siempre una ambigüedad: elegir una en
+    silencio serviría una ley que el cliente no nombró. Un id vacío no nombra
+    ninguna ley, aunque sea parte de todos los ids.
+
+    Lo que se devuelve es siempre la clave guardada.
     """
-    pedido = id_ley.strip()
-    if pedido.casefold().endswith(".md"):
-        pedido = pedido[:-3]
+    pedido = _id_pedido(id_ley)
+    if not pedido:
+        return None, None, None, ErrorRespuesta(
+            error="ID vacío: indica el id de una ley, como los que devuelve `buscar_ley`.")
     clave = pedido.casefold()
-    paises_a_buscar = _paises(pais)
 
-    for pais_code in paises_a_buscar:
-        con = _CONEXIONES[pais_code]
-        fila = con.execute(_SELECT_LEY + " WHERE id = ? COLLATE BINARY", (pedido,)).fetchone()
-        if fila:
-            return pais_code, fila[0], legalize_indice.fila_a_doc(fila), None
-
-        iguales = con.execute(_SELECT_LEY + " WHERE id_casefold = ? ORDER BY n", (clave,)).fetchall()
-        if len(iguales) == 1:
-            return pais_code, iguales[0][0], legalize_indice.fila_a_doc(iguales[0]), None
-        if len(iguales) > 1:
-            return None, None, None, ErrorRespuesta(
-                error="ID ambiguo: coincide con más de una ley si se ignoran mayúsculas.",
-                sugerencias=[_sanitize_metadata(f[0], max_len=200) for f in iguales[:10]],
-            )
-
+    def parcial(con, _pais):
         # Primero los números de fila, recorriendo el índice de `id_casefold`
         # —mucho más estrecho que la tabla— y después las filas. Medido en el
         # corpus español: 0,6 ms frente a 3,4 recorriendo la tabla, que hacía
         # este caso más lento que con el índice en memoria (SC-004). El índice
         # existe siempre: `abrir` rechaza un esquema sin él.
-        numeros = [n for n, in con.execute(
+        return _filas_por_numero(con, [n for n, in con.execute(
             "SELECT n FROM leyes INDEXED BY leyes_id_casefold "
-            "WHERE instr(id_casefold, ?) > 0 ORDER BY n LIMIT 11", (clave,))]
-        matches = con.execute(
-            f"{_SELECT_LEY} WHERE n IN ({', '.join('?' * len(numeros))}) ORDER BY n",
-            numeros).fetchall() if numeros else []
-        if len(matches) == 1:
-            return pais_code, matches[0][0], legalize_indice.fila_a_doc(matches[0]), None
-        if len(matches) > 1 and len(paises_a_buscar) == 1:
+            "WHERE instr(id_casefold, ?) > 0 ORDER BY n LIMIT 11", (clave,))])
+
+    fases = (
+        ("", lambda con, _pais: con.execute(
+            _SELECT_LEY + " WHERE id = ? COLLATE BINARY", (pedido,)).fetchall()),
+        (" si se ignoran mayúsculas", lambda con, _pais: con.execute(
+            _SELECT_LEY + " WHERE id_casefold = ? ORDER BY n", (clave,)).fetchall()),
+        (" por una parte de su id", parcial),
+    )
+    for matiz, buscar in fases:
+        coincidencias = [(p, fila) for p in _paises(pais) for fila in buscar(_CONEXIONES[p], p)]
+        if len(coincidencias) == 1:
+            p, fila = coincidencias[0]
+            return p, fila[0], legalize_indice.fila_a_doc(fila), None
+        if coincidencias:
+            paises = list(dict.fromkeys(p for p, _ in coincidencias))
+            donde = (f" Hay coincidencias en más de un país ({', '.join(paises)}): "
+                     "indica `pais`." if len(paises) > 1 else "")
             return None, None, None, ErrorRespuesta(
-                error="ID ambiguo: coincide con más de una ley.",
-                sugerencias=[_sanitize_metadata(f[0], max_len=200) for f in matches[:10]],
+                error=f"ID ambiguo: coincide con más de una ley{matiz}.{donde}",
+                sugerencias=list(dict.fromkeys(_sanitize_metadata(f[0], max_len=200)
+                                                for _, f in coincidencias))[:10],
             )
 
     return None, None, None, ErrorRespuesta(
         error=f"Ley no encontrada: {_sanitize_metadata(pedido, max_len=100)}"
     )
-
 
 
 # ─────────────────────────── Servidor MCP ────────────────────────────────────
