@@ -23,13 +23,17 @@ acentuadas; lo que no listaba sobrevivía al plegado y el patrón de término
 rotas (`être` → "tre", `arrêté` → "arr", `œuvre` → "uvre") y 1.864 españolas
 (`año` sin término, `España` → "espa"). Ahora:
 
-- Se quitan todas las marcas diacríticas tras la descomposición canónica (NFD),
-  así que un idioma que nadie enumeró también se pliega. Solo canónica: NFKD
-  reescribiría ordinales y ligaduras (`1º`, `ﬁ`), que no son diacríticos.
+- Se quitan todas las marcas diacríticas tras la descomposición (NFKD), así
+  que un idioma que nadie enumeró también se pliega. Es la de compatibilidad
+  y no solo la canónica desde el ADR 0013: ordinales, superíndices,
+  subíndices y ligaduras (`13ª`, `cm³`, `co₂`, `aﬁliación`) se quedaban como
+  un solo término en el índice que la consulta partía o descartaba, así que
+  `texto` no los encontraba nunca (#74). Ahora `co2` encuentra `co₂`.
 - La `ñ` se conserva como letra: plegarla a `n` juntaría año con ano y uña con
   una. El tokenizador la admite en su patrón.
-- Una tabla pequeña cubre lo que Unicode no descompone (œ, æ, ß, ø, ł) y el
-  punto volado catalán, que partía `col·legi`.
+- Una tabla pequeña cubre lo que Unicode no descompone (œ, æ, ß, ø, ł, ð, þ,
+  ı, ħ), el punto volado catalán, que partía `col·legi`, y los apóstrofos y
+  primas modificadores, que pegaban dos palabras (`bishopʼs`).
 
 Sigue plegando å ä ö a a a o, como aceptó el ADR 0004 para el sueco.
 
@@ -45,7 +49,14 @@ import unicodedata
 # volado catalán. Se aplican tras quitar las marcas.
 TABLA = str.maketrans({
     "œ": "oe", "æ": "ae", "ß": "ss", "ø": "o", "ł": "l", "đ": "d",
+    # ADR 0013: islandés y feroés (`heilbrigðis`), turco (`balıkesir`) y
+    # maltés (`għal`), en anexos de leyes españolas, europeas y británicas.
+    "ð": "d", "þ": "th", "ı": "i", "ħ": "h",
     "·": "",
+    # Apóstrofos y primas que Unicode clasifica como letras modificadoras, así
+    # que `unicode61` los dejaba dentro de la palabra: separan como el
+    # apóstrofo ASCII. Medido el 2026-11-15: ~200 términos en es y uk.
+    "ʼ": " ", "ʹ": " ", "ʺ": " ", "ˮ": " ",
 })
 
 # Marcas combinantes de los bloques diacríticos. Tras NFD son ellas las que
@@ -73,7 +84,7 @@ def normalizar(texto: str) -> str:
     Todo son operaciones en C —`lower`, `normalize`, `replace`, `sub`,
     `translate`—, porque el tokenizador pasa por aquí el corpus entero.
     """
-    descompuesto = unicodedata.normalize("NFD", texto.lower())
+    descompuesto = unicodedata.normalize("NFKD", texto.lower())
     for separada, letra in _CONSERVADAS.items():
         descompuesto = descompuesto.replace(separada, letra)
     return _MARCAS_RE.sub("", descompuesto).translate(TABLA)
