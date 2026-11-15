@@ -521,6 +521,15 @@ def _sanitize_metadata(value: str, max_len: int = 500) -> str:
     cleaned = legalize_injection.filtrar(cleaned, legalize_injection.SURFACE_METADATA)
     return cleaned[:max_len]
 
+def _id_mostrado(id_ley) -> str:
+    """El id de una ley tal como el servidor se lo enseña al modelo.
+
+    Único sitio que lo decide, porque `_resolve_ley` tiene que aceptar de vuelta
+    exactamente esta forma (#80): si un listado y la resolución saneasen de
+    maneras distintas, el cliente recibiría ids que no abren nada.
+    """
+    return _sanitize_metadata(id_ley, max_len=200)
+
 def _neutralize_delimiter(texto: str) -> str:
     """Neutraliza intentos del contenido de cerrar el delimitador de confianza.
 
@@ -589,7 +598,7 @@ def _bytes_de(doc: dict) -> int:
 
 def _doc_resumen(doc_id: str, doc: dict, pais: str) -> DocumentoResumen:
     return DocumentoResumen(
-        id=_sanitize_metadata(doc_id, max_len=200),
+        id=_id_mostrado(doc_id),
         pais=_sanitize_metadata(pais, max_len=50),
         titulo=_sanitize_metadata(doc.get("titulo", "")),
         rango=_sanitize_metadata(doc.get("rango", ""), max_len=100),
@@ -844,12 +853,43 @@ def _paises(pais: str = "") -> list[str]:
     return [pais] if pais and pais in _CONEXIONES else list(_CONEXIONES)
 
 
+# Por país: la conexión con la que se calculó y {forma mostrada: [n, ...]} de
+# los ids que cambian al mostrarse. Ver `_ids_mostrados`.
+_IDS_MOSTRADOS: dict = {}
+
+
 def _id_pedido(id_ley) -> str:
     """Un id tal como se compara: sin espacios alrededor ni `.md` final."""
     pedido = id_ley.strip() if isinstance(id_ley, str) else ""
     if pedido.casefold().endswith(".md"):
         pedido = pedido[:-3]
     return pedido
+
+
+def _ids_mostrados(pais: str) -> dict:
+    """Los ids de un país que el servidor enseña distintos de como están guardados.
+
+    Un id con un carácter invisible, con una frase filtrada o guardado como blob
+    se lista en la forma de `_id_mostrado`, que no es su clave, y el cliente no
+    podía abrir la ley con lo que se le había dado (#80). Ningún id real cambia:
+    medido el 2026-11-15 sobre los 140.241 ids de los cinco corpus.
+
+    Se calcula la primera vez que una resolución llega a esta fase y se guarda
+    junto a la conexión: sanear todos los ids cuesta unos 976 ms con los cinco
+    corpus, demasiado para el arranque y para cada petición, y un índice
+    registrado de nuevo trae otra conexión, que invalida lo guardado.
+    """
+    con = _CONEXIONES[pais]
+    guardado = _IDS_MOSTRADOS.get(pais)
+    if guardado and guardado[0] is con:
+        return guardado[1]
+    mapa: dict = {}
+    for n, id_ley in con.execute("SELECT n, id FROM leyes ORDER BY n"):
+        clave = _id_pedido(_id_mostrado(id_ley))
+        if clave and clave != id_ley:
+            mapa.setdefault(clave, []).append(n)
+    _IDS_MOSTRADOS[pais] = (con, mapa)
+    return mapa
 
 
 def _filas_por_numero(con, numeros) -> list:
@@ -868,8 +908,8 @@ def _resolve_ley(id_ley: str, pais: str = ""):
     cada llamador tenga que envolver a su manera.
 
     Las coincidencias de una ambigüedad van en `sugerencias`, que es el campo
-    que existe para eso. Son IDs del corpus, es decir texto no confiable: pasan
-    por _sanitize_metadata igual que cualquier otro metadato que llega al LLM.
+    que existe para eso. Son IDs del corpus, es decir texto no confiable, y van
+    en la forma de `_id_mostrado`, la misma que se acepta de vuelta.
 
     Se resuelve por fases, cada una sobre todos los países pedidos, y una fase
     solo cede a la siguiente si no encuentra nada:
@@ -879,7 +919,8 @@ def _resolve_ley(id_ley: str, pais: str = ""):
        245 leyes españolas (`BOJA-b-…`), 44 suecas (`SFS-1827-60s.1007`) y todo
        id numérico, que lleva el prefijo del país en minúsculas (medido el
        2026-10-18);
-    3. una parte del id.
+    3. la forma en que el servidor muestra el id (#80, ver `_ids_mostrados`);
+    4. una parte del id.
 
     Antes se recorría país a país con las tres comparaciones, así que la
     respuesta dependía de qué países se buscaban (#75): un acierto parcial en
@@ -912,6 +953,8 @@ def _resolve_ley(id_ley: str, pais: str = ""):
             _SELECT_LEY + " WHERE id = ? COLLATE BINARY", (pedido,)).fetchall()),
         (" si se ignoran mayúsculas", lambda con, _pais: con.execute(
             _SELECT_LEY + " WHERE id_casefold = ? ORDER BY n", (clave,)).fetchall()),
+        (" tal como se muestra", lambda con, p: _filas_por_numero(
+            con, _ids_mostrados(p).get(pedido, [])[:11])),
         (" por una parte de su id", parcial),
     )
     for matiz, buscar in fases:
@@ -925,8 +968,7 @@ def _resolve_ley(id_ley: str, pais: str = ""):
                      "indica `pais`." if len(paises) > 1 else "")
             return None, None, None, ErrorRespuesta(
                 error=f"ID ambiguo: coincide con más de una ley{matiz}.{donde}",
-                sugerencias=list(dict.fromkeys(_sanitize_metadata(f[0], max_len=200)
-                                                for _, f in coincidencias))[:10],
+                sugerencias=list(dict.fromkeys(_id_mostrado(f[0]) for _, f in coincidencias))[:10],
             )
 
     return None, None, None, ErrorRespuesta(
@@ -1322,7 +1364,7 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
             situacion = ("ha cambiado desde que se indexó" if motivo == TEXTO_CAMBIADO
                          else "no está disponible")
             return ErrorRespuesta(
-                error=f"El texto de la ley {_sanitize_metadata(found_id, max_len=200)} {situacion}: "
+                error=f"El texto de la ley {_id_mostrado(found_id)} {situacion}: "
                       f"{_REMEDIOS_TEXTO[motivo]} `solo_metadata=True` devuelve sus metadatos.")
         body = _strip_frontmatter(crudo)
         if len(body) > max_chars:
@@ -1417,7 +1459,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     # por el mismo saneado y con los mismos límites que `_doc_resumen`. Antes se
     # devolvía cruda: un título hostil llegaba entero por la única herramienta
     # que se saltaba el filtro.
-    id_safe = _sanitize_metadata(found_id, max_len=200)
+    id_safe = _id_mostrado(found_id)
     pais_safe = _sanitize_metadata(found_pais, max_len=50)
     titulo = _sanitize_metadata(found_doc.get("titulo", ""))
 
