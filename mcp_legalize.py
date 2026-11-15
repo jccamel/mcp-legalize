@@ -718,31 +718,69 @@ def _legible(doc: dict, pais_code: str) -> bool:
     return ruta.is_file() and os.access(ruta, os.R_OK)
 
 
-def _leer_ley(doc: dict, pais_code: str) -> str | None:
-    """El contenido del fichero de una ley, o None si no se pudo leer.
+def _cambiado(doc: dict, pais_code: str) -> bool:
+    """Si el fichero de una ley ya no es el que se escaneó al indexarla.
 
-    None cubre una ruta rechazada, un fichero que no existe y uno que no se
-    puede leer. Un fichero que existe y está vacío no es None: es lo que dice
-    la fuente. Es la diferencia de #68: `_read_file` degrada a texto vacío
-    para que las herramientas sigan en pie, pero el texto vacío seguía camino
-    como si fuera la ley, y "nadie la leyó" se servía como "la ley no dice
-    nada".
+    El escáner corre al indexar y el servidor lee del disco al servir: un
+    fichero que cambió después —basta un `git pull` sin reindexar— llegaba al
+    modelo sin haber pasado por la cuarentena (GHSA-vwxp-gm9m-58vm). La regla
+    es la del indexador para decidir qué reescanear (`_needs_update`): otro
+    tamaño, o un fichero más reciente que su registro. La longitud del cuerpo
+    no sirve: una edición del mismo tamaño la burla.
 
-    Lee con `_read_file` y solo mira el fichero cuando el texto llega vacío:
-    así una ley con texto no paga nada más, y `_read_file` sigue siendo el
-    único sitio que lee.
+    Sin fecha registrada no hay con qué comparar y se da por no cambiado: el
+    indexador la escribe siempre, así que solo le falta a un índice hecho a
+    mano. Un índice manipulado podría omitirla, pero quien controla el índice
+    ya decide qué leyes están en cuarentena; esto defiende del corpus que
+    cambia, no del índice.
+
+    Se mira DESPUÉS de leer: un fichero que cambie antes de la lectura cambia
+    también su fecha, y si desaparece entre medias se da por cambiado.
     """
-    texto = _read_file(doc, pais_code)
-    if texto or _legible(doc, pais_code):
-        return texto
-    return None
+    registrado = doc.get("_mtime")
+    if isinstance(registrado, bool) or not isinstance(registrado, (int, float)) or registrado <= 0:
+        return False
+    try:
+        estado = _resolve_ruta(doc, pais_code).stat()
+    except (OSError, ValueError):
+        return True
+    return estado.st_size != _bytes_de(doc) or estado.st_mtime > registrado
 
 
 # Por qué una ley encontrada no trae texto. Lo dicen `obtener_ley`, como
-# ErrorRespuesta, y `obtener_articulo`, en su `error` (#68).
+# ErrorRespuesta, y `obtener_articulo`, en su `error` (#68, GHSA-vwxp-gm9m-58vm).
 TEXTO_NO_DISPONIBLE = "Texto de la ley no disponible"
-_REMEDIO_TEXTO = ("el fichero no existe o no se puede leer. Si se borró o se movió en el corpus, "
-                  "regenera el índice con update_index.py.")
+TEXTO_CAMBIADO = "Texto de la ley cambiado desde que se indexó"
+_REMEDIOS_TEXTO = {
+    TEXTO_NO_DISPONIBLE: ("el fichero no existe o no se puede leer. Si se borró o se movió en el "
+                          "corpus, regenera el índice con update_index.py."),
+    TEXTO_CAMBIADO: ("el fichero no es el que se analizó al indexar y no se sirve sin pasar por "
+                     "el escáner. Regenera el índice con update_index.py."),
+}
+
+
+def _leer_ley(doc: dict, pais_code: str) -> tuple[str | None, str | None]:
+    """`(contenido, None)` del fichero de una ley, o `(None, motivo)` si no se sirve.
+
+    `TEXTO_NO_DISPONIBLE` cubre una ruta rechazada, un fichero que no existe y
+    uno que no se puede leer. Un fichero que existe y está vacío no lo es: es
+    lo que dice la fuente. Es la diferencia de #68: `_read_file` degrada a
+    texto vacío para que las herramientas sigan en pie, pero el texto vacío
+    seguía camino como si fuera la ley, y "nadie la leyó" se servía como "la
+    ley no dice nada". `TEXTO_CAMBIADO` es un fichero que no es el que se
+    escaneó (`_cambiado`).
+
+    Lee con `_read_file`, que sigue siendo el único sitio que lee, y solo mira
+    si el fichero existe cuando el texto llega vacío.
+    """
+    texto = _read_file(doc, pais_code)
+    if not texto and not _legible(doc, pais_code):
+        return None, TEXTO_NO_DISPONIBLE
+    if _cambiado(doc, pais_code):
+        print(f"[SEGURIDAD] {doc.get('identificador', '')!r}: el fichero cambió desde que se "
+              f"indexó; no se sirve. Regenera el índice con update_index.py.", file=sys.stderr)
+        return None, TEXTO_CAMBIADO
+    return texto, None
 
 def _strip_frontmatter(content: str) -> str:
     """Delega en legalize_frontmatter: ver el módulo para las reglas.
@@ -923,7 +961,9 @@ la ley, para no tener que buscarla otra vez.
 Texto no disponible: si la ley está en el índice pero su fichero no se puede
 leer, obtener_ley responde con ErrorRespuesta y obtener_articulo con un `error`
 que empieza por "Texto de la ley no disponible". Nunca es una ley vacía ni un
-artículo que no existe: nadie la ha leído. `solo_metadata=True` sigue
+artículo que no existe: nadie la ha leído. Lo mismo, con "Texto de la ley
+cambiado desde que se indexó", si el fichero cambió después de indexarse: no se
+sirve sin haber pasado por el análisis de seguridad. `solo_metadata=True` sigue
 devolviendo los metadatos.
 
 Números repetidos: hay leyes que reinician la numeración en cada capítulo (los
@@ -1254,11 +1294,13 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     max_chars = max(0, max_chars)
 
     if not solo_metadata:
-        crudo = _leer_ley(found_doc, found_pais)  # type: ignore[arg-type]
+        crudo, motivo = _leer_ley(found_doc, found_pais)  # type: ignore[arg-type]
         if crudo is None:
+            situacion = ("ha cambiado desde que se indexó" if motivo == TEXTO_CAMBIADO
+                         else "no está disponible")
             return ErrorRespuesta(
-                error=f"El texto de la ley {_sanitize_metadata(found_id, max_len=200)} no está "
-                      f"disponible: {_REMEDIO_TEXTO} `solo_metadata=True` devuelve sus metadatos.")
+                error=f"El texto de la ley {_sanitize_metadata(found_id, max_len=200)} {situacion}: "
+                      f"{_REMEDIOS_TEXTO[motivo]} `solo_metadata=True` devuelve sus metadatos.")
         body = _strip_frontmatter(crudo)
         if len(body) > max_chars:
             texto = body[:max_chars]
@@ -1341,7 +1383,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if err:
         return err
 
-    crudo = _leer_ley(found_doc, found_pais)
+    crudo, motivo = _leer_ley(found_doc, found_pais)
     content = _strip_frontmatter(crudo or "")
     articulo_clean = articulo.strip()
     # Por debajo de cero es cero, igual que `max_chars`: un valor negativo
@@ -1365,7 +1407,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
         # encontrado": eso afirma que se leyó la ley (#68).
         return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo,
                                  articulo_buscado=articulo_clean,
-                                 error=f"{TEXTO_NO_DISPONIBLE}: {_REMEDIO_TEXTO}",
+                                 error=f"{motivo}: {_REMEDIOS_TEXTO[motivo]}",
                                  **_estado_y_vigencia(found_doc))
 
     ubicacion = ubicaciones = None
