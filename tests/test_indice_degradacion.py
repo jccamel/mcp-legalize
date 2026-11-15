@@ -213,11 +213,15 @@ def test_a_path_that_is_a_blob_costs_that_row_and_not_the_search(con_ruta_blob):
 
 
 def test_a_law_whose_path_is_a_blob_is_served_without_text(con_ruta_blob):
-    """The path is what cannot be read, so the text is what is lost; the tool answers."""
+    """The path is what cannot be read, so the text is what is lost: the tool
+    says so (#68) instead of failing, and the metadata is still served."""
     cargar()
 
-    ley = mcp_legalize.obtener_ley.fn("EVIL-1", pais="t")
+    sin_texto = mcp_legalize.obtener_ley.fn("EVIL-1", pais="t")
+    ley = mcp_legalize.obtener_ley.fn("EVIL-1", pais="t", solo_metadata=True)
 
+    assert isinstance(sin_texto, mcp_legalize.ErrorRespuesta)
+    assert "no está disponible" in sin_texto.error
     assert ley.id == "EVIL-1"
     assert "Ley hostil" in ley.titulo
 

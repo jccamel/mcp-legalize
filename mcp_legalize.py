@@ -708,6 +708,42 @@ def _read_file(doc: dict, pais_code: str) -> str:
         # herramientas — una ley ilegible degrada a texto vacío, no a un fallo.
         return ""
 
+
+def _legible(doc: dict, pais_code: str) -> bool:
+    """Si el fichero de una ley es uno que `_read_file` puede leer."""
+    try:
+        ruta = _resolve_ruta(doc, pais_code)
+    except ValueError:
+        return False
+    return ruta.is_file() and os.access(ruta, os.R_OK)
+
+
+def _leer_ley(doc: dict, pais_code: str) -> str | None:
+    """El contenido del fichero de una ley, o None si no se pudo leer.
+
+    None cubre una ruta rechazada, un fichero que no existe y uno que no se
+    puede leer. Un fichero que existe y está vacío no es None: es lo que dice
+    la fuente. Es la diferencia de #68: `_read_file` degrada a texto vacío
+    para que las herramientas sigan en pie, pero el texto vacío seguía camino
+    como si fuera la ley, y "nadie la leyó" se servía como "la ley no dice
+    nada".
+
+    Lee con `_read_file` y solo mira el fichero cuando el texto llega vacío:
+    así una ley con texto no paga nada más, y `_read_file` sigue siendo el
+    único sitio que lee.
+    """
+    texto = _read_file(doc, pais_code)
+    if texto or _legible(doc, pais_code):
+        return texto
+    return None
+
+
+# Por qué una ley encontrada no trae texto. Lo dicen `obtener_ley`, como
+# ErrorRespuesta, y `obtener_articulo`, en su `error` (#68).
+TEXTO_NO_DISPONIBLE = "Texto de la ley no disponible"
+_REMEDIO_TEXTO = ("el fichero no existe o no se puede leer. Si se borró o se movió en el corpus, "
+                  "regenera el índice con update_index.py.")
+
 def _strip_frontmatter(content: str) -> str:
     """Delega en legalize_frontmatter: ver el módulo para las reglas.
 
@@ -883,6 +919,12 @@ País: `pais` no distingue mayúsculas. Un código que no corresponde a ningún
 La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
 la ley, para no tener que buscarla otra vez.
+
+Texto no disponible: si la ley está en el índice pero su fichero no se puede
+leer, obtener_ley responde con ErrorRespuesta y obtener_articulo con un `error`
+que empieza por "Texto de la ley no disponible". Nunca es una ley vacía ni un
+artículo que no existe: nadie la ha leído. `solo_metadata=True` sigue
+devolviendo los metadatos.
 
 Números repetidos: hay leyes que reinician la numeración en cada capítulo (los
 códigos suecos repiten `1 §`). obtener_articulo devuelve la primera aparición y,
@@ -1212,7 +1254,12 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     max_chars = max(0, max_chars)
 
     if not solo_metadata:
-        body = _strip_frontmatter(_read_file(found_doc, found_pais))  # type: ignore[arg-type]
+        crudo = _leer_ley(found_doc, found_pais)  # type: ignore[arg-type]
+        if crudo is None:
+            return ErrorRespuesta(
+                error=f"El texto de la ley {_sanitize_metadata(found_id, max_len=200)} no está "
+                      f"disponible: {_REMEDIO_TEXTO} `solo_metadata=True` devuelve sus metadatos.")
+        body = _strip_frontmatter(crudo)
         if len(body) > max_chars:
             texto = body[:max_chars]
             resultado.texto_truncado = True
@@ -1294,7 +1341,8 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     if err:
         return err
 
-    content = _strip_frontmatter(_read_file(found_doc, found_pais))
+    crudo = _leer_ley(found_doc, found_pais)
+    content = _strip_frontmatter(crudo or "")
     articulo_clean = articulo.strip()
     # Por debajo de cero es cero, igual que `max_chars`: un valor negativo
     # ponía el final de un artículo abierto antes de su encabezado (#73).
@@ -1310,6 +1358,15 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     # Sanitizar input del LLM antes de loguear: evitar log injection via caracteres de control.
     articulo_safe_log = re.sub(r"[\x00-\x1f\x7f]", "", articulo_clean[:50])
+
+    if crudo is None:
+        # La ley se encontró y su identidad es información real, así que va en
+        # el `error` propio de esta herramienta. No es "Artículo no
+        # encontrado": eso afirma que se leyó la ley (#68).
+        return ArticuloResultado(id=id_safe, pais=pais_safe, titulo=titulo,
+                                 articulo_buscado=articulo_clean,
+                                 error=f"{TEXTO_NO_DISPONIBLE}: {_REMEDIO_TEXTO}",
+                                 **_estado_y_vigencia(found_doc))
 
     ubicacion = ubicaciones = None
     capitulo_clean = capitulo.strip()
