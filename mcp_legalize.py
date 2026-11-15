@@ -1517,6 +1517,9 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     capítulo. Sin `capitulo` se devuelve la primera aparición, como siempre, y
     `ubicaciones` dice cuáles hay; con `capitulo`, la de esa ubicación. Antes
     solo la primera era alcanzable (spec 002, US5).
+
+    Un artículo intercalado se pide con su sufijo: `articulo="3 bis"`. El `3`
+    es solo el artículo 3, no el 3 bis (#72).
     """
     _refrescar_indices()
     if not _CONEXIONES:
