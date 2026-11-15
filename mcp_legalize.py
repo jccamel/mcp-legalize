@@ -712,14 +712,23 @@ def _pais_pedido(pais: str) -> "tuple[str, ErrorRespuesta | None]":
     que quien se equivocaba al escribir recibía la respuesta a otra pregunta
     sin nada que se lo dijera (#69, principio IV).
 
+    No distingue mayúsculas, como los ids desde el 2026-10-18: el cliente
+    escribe el código como lo ha visto o como prefiere, y `pais="ES"` no puede
+    ser un país desconocido (#70). Lo que se devuelve es siempre la clave
+    guardada. Una coincidencia exacta gana, y dos claves que empatan al ignorar
+    mayúsculas no se eligen en silencio.
+
     Es el único sitio que lo decide: las seis herramientas que aceptan `pais`
     pasan por aquí, con el mismo mensaje (principio III).
     """
-    pedido = pais if isinstance(pais, str) else ""
+    pedido = pais.strip() if isinstance(pais, str) else ""
     if not pedido:
         return "", None
     if pedido in _CONEXIONES:
         return pedido, None
+    iguales = [codigo for codigo in _CONEXIONES if codigo.casefold() == pedido.casefold()]
+    if len(iguales) == 1:
+        return iguales[0], None
     return "", ErrorRespuesta(
         error=f"País '{_sanitize_metadata(pedido, max_len=50)}' no reconocido.",
         sugerencias=list(_CONEXIONES),
@@ -837,9 +846,9 @@ Errores: cuando una herramienta no puede devolver nada, responde con
 ErrorRespuesta {error, sugerencias?}. `sugerencias` viene rellena cuando hay
 alternativas concretas — un id ambiguo devuelve ahí las leyes que coinciden.
 
-País: un `pais` que no corresponde a ningún índice es un error en todas las
-herramientas, con los códigos disponibles en `sugerencias`; nunca se responde
-con todos los países en su lugar.
+País: `pais` no distingue mayúsculas. Un código que no corresponde a ningún
+índice es un error en todas las herramientas, con los códigos disponibles en
+`sugerencias`; nunca se responde con todos los países en su lugar.
 
 La única excepción es obtener_articulo: si la ley existe pero el artículo no,
 devuelve ArticuloResultado con `error` relleno y con `id`, `pais` y `titulo` de
