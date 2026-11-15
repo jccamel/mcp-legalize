@@ -523,8 +523,12 @@ def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion=
 
     Reproduce la semántica de los filtros que había en memoria:
 
-    - Subcadena sobre la forma plegada en título, rango, estado, jurisdicción y
+    - Subcadena sobre la forma plegada en título, rango, jurisdicción y
       departamento. `instr` y no `LIKE`, que añadiría comodines que escapar.
+    - `estado` es el valor entero, plegado igual. Es un vocabulario cerrado
+      (`in_force`, `repealed`, `expired`, `annulled`, `partially_repealed`,
+      medido el 2026-11-15 en los seis índices locales), y como subcadena
+      `repealed` devolvía también las `partially_repealed` (#71).
     - `anno` es un prefijo de la fecha de publicación.
     - Las fechas de publicación dejan pasar los documentos sin fecha; las de
       derogación, de actualización y de fin de vigencia exigen que exista.
@@ -564,7 +568,9 @@ def construir_filtro(*, consulta="", rango="", estado="", anno="", jurisdiccion=
     rango_fechas("fecha_derogacion", derogada_desde, derogada_hasta, exige=True)
     rango_fechas("ultima_actualizacion", actualizada_desde, actualizada_hasta, exige=True)
     rango_fechas("fecha_fin_vigencia", fin_vigencia_desde, fin_vigencia_hasta, exige=True)
-    subcadena("estado_norm", estado)
+    if estado.strip():
+        condiciones.append("estado_norm = ?")
+        parametros.append(legalize_normalizacion.normalizar(estado.strip()))
     subcadena("rango_norm", rango)
     subcadena("jurisdiccion_norm", jurisdiccion)
     subcadena("departamento_norm", departamento)
