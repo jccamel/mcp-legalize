@@ -241,3 +241,28 @@ def test_the_indexer_does_not_build_on_an_index_with_a_row_it_cannot_read(con_ru
     """
     with pytest.raises(ValueError, match="fila_ilegible"):
         legalize_indice.como_dict(con_ruta_blob)
+
+
+# ─────────────────── two indices that claim the same country ─────────────────
+
+def test_a_second_index_for_the_same_country_does_not_replace_the_first(entorno, capsys):
+    """Each index is served under its country code, and the code comes from the index.
+
+    Two files that declared the same one — a copy left under another name is
+    enough — were both logged as loaded, and the second took the place of the
+    first in every table: the corpus the server answered from depended on a
+    file name, and the first connection was never closed (#79). The files are
+    read in name order, so the first one keeps the country and the second is
+    refused like any other index that cannot be served, naming both.
+    """
+    escribir(entorno, "legalize-a", "t", {"A": {"titulo": "Ley de a", "_ruta": "a.md", "_bytes": 10}})
+    escribir(entorno, "legalize-b", "t", {"B": {"titulo": "Ley de b", "_ruta": "b.md", "_bytes": 10}})
+
+    cargar()
+
+    assert [r.id for r in mcp_legalize.buscar_ley.fn(pais="t")] == ["A"]
+    assert [(p.codigo, p.indice, p.total_documentos) for p in mcp_legalize.listar_paises.fn()] == [
+        ("t", "index_legalize-a", 1)]
+    rechazo = [linea for linea in capsys.readouterr().err.splitlines() if "índice ignorado" in linea]
+    assert len(rechazo) == 1
+    assert "index_legalize-b.db" in rechazo[0] and "index_legalize-a" in rechazo[0]

@@ -373,6 +373,26 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
         con.close()
         return
 
+    # El código sale del índice, así que dos ficheros pueden declarar el mismo:
+    # basta una copia con otro nombre. El segundo sustituía al primero en todas
+    # las tablas, los dos aparecían como cargados y la primera conexión no se
+    # cerraba nunca: de qué corpus respondía el servidor dependía del nombre de
+    # un fichero (#79). Los índices se leen en orden de nombre; el primero
+    # conserva el país y el otro no se sirve, como cualquier índice inservible.
+    #
+    # El mismo fichero registrado otra vez no es un segundo índice sino el
+    # mismo, vuelto a abrir: sustituye al anterior, y la conexión vieja se
+    # cierra.
+    nombre_indice = _sanitize_metadata(index_path.stem, max_len=100)
+    if pais_code in _CONEXIONES:
+        if _INDEX_FILE_POR_PAIS.get(pais_code) != nombre_indice:
+            print(f"[SEGURIDAD] {index_path.name!r}: el país {pais_code!r} ya lo sirve "
+                  f"{_INDEX_FILE_POR_PAIS.get(pais_code, '')!r}; índice ignorado.", file=sys.stderr)
+            con.close()
+            return
+        _CONEXIONES[pais_code].close()
+        _TEXTO_NO_DISPONIBLE.pop(pais_code, None)
+
     # Una fila con un valor que no es texto donde va texto se sirve con ese
     # campo vacío (`legalize_indice.fila_a_doc`). Queda dicho aquí, una vez por
     # índice y no una por consulta, que llenaría el registro.
@@ -386,7 +406,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
     meta["conteos"] = legalize_indice.conteos_validos(meta.get("conteos"))
     _CONEXIONES[pais_code] = con
     _META_POR_PAIS[pais_code] = meta
-    _INDEX_FILE_POR_PAIS[pais_code] = _sanitize_metadata(index_path.stem, max_len=100)
+    _INDEX_FILE_POR_PAIS[pais_code] = nombre_indice
     _RAIZ_POR_PAIS[pais_code] = raiz
     if meta.get("tokenizador") != legalize_tokenizer.huella():
         # El texto se plegó con otras reglas: buscar con las actuales daría
@@ -1175,6 +1195,11 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
 
     resumen = _doc_resumen(found_id, found_doc, found_pais)
     resultado = LeyCompleta(**resumen.model_dump())
+    # Por debajo de cero es cero, como `limite` en `buscar_ley`. El valor iba
+    # tal cual al corte, y en Python un límite negativo cuenta desde el final:
+    # `max_chars=-5` devolvía la ley sin sus cinco últimos caracteres y decía
+    # `chars_devueltos=-5` (#73).
+    max_chars = max(0, max_chars)
 
     if not solo_metadata:
         body = _strip_frontmatter(_read_file(found_doc, found_pais))  # type: ignore[arg-type]
@@ -1195,11 +1220,6 @@ def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_ch
     _SECURITY_LOGGER.debug(
         "DOCUMENT_ACCESS | id=%s | country=%s | full_text=%s",
         found_id, found_pais, not solo_metadata,
-    # Por debajo de cero es cero, como `limite` en `buscar_ley`. El valor iba
-    # tal cual al corte, y en Python un límite negativo cuenta desde el final:
-    # `max_chars=-5` devolvía la ley sin sus cinco últimos caracteres y decía
-    # `chars_devueltos=-5` (#73).
-    max_chars = max(0, max_chars)
     )
 
     return resultado
@@ -1266,6 +1286,9 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
 
     content = _strip_frontmatter(_read_file(found_doc, found_pais))
     articulo_clean = articulo.strip()
+    # Por debajo de cero es cero, igual que `max_chars`: un valor negativo
+    # ponía el final de un artículo abierto antes de su encabezado (#73).
+    contexto_chars = max(0, contexto_chars)
     # La identidad de la ley sale del índice y llega al modelo fuera de
     # <untrusted_content>, igual que en `buscar_ley` y `obtener_ley`, así que pasa
     # por el mismo saneado y con los mismos límites que `_doc_resumen`. Antes se
@@ -1286,9 +1309,6 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
             # El servidor no interpreta nombres de capítulo: compara con las
             # ubicaciones que él mismo devuelve, ya saneadas, porque son las
             # únicas que el cliente ha podido ver.
-    # Por debajo de cero es cero, igual que `max_chars`: un valor negativo
-    # ponía el final de un artículo abierto antes de su encabezado (#73).
-    contexto_chars = max(0, contexto_chars)
             nombres = [_sanitize_metadata(u) for u, *_ in apariciones]
             elegida = nombres.index(capitulo_clean) if capitulo_clean in nombres else (
                 None if capitulo_clean else 0)
