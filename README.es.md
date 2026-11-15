@@ -183,7 +183,9 @@ propone la orden que lo resuelve. Ejecutarla una vez lo resuelve, sin flags:
 | `RAÍZ` | El índice sitúa su corpus fuera de `LEGALIZE_REPOS_DIR`. No se comprueba nada ahí, ni siquiera se ejecuta git |
 
 Cada pasada escribe sobre una copia del índice y la sustituye entera, así que una
-pasada interrumpida deja intacto el índice anterior. Cuando una actualización
+pasada interrumpida deja intacto el índice anterior. Un servidor en marcha nota
+la sustitución en su siguiente llamada y sirve el índice nuevo, como tras
+reiniciarlo; un corpus nuevo sigue necesitando reinicio. Cuando una actualización
 cambia el formato del índice, `check_updates.py` informa todos los corpus como
 `FORMATO` y el servidor deja de servirlos: hay que reindexar cada uno antes de
 reiniciarlo. Un corpus cuyo

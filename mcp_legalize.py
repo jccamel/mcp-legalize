@@ -260,6 +260,9 @@ _RAIZ_POR_PAIS: dict[str, Path] = {}
 # otro tokenizador, o uno cuya consulta de texto falló. El resto del país se
 # sigue sirviendo.
 _TEXTO_NO_DISPONIBLE: dict[str, str] = {}
+# Por país: la conexión, el fichero del que se abrió y su identidad en ese
+# momento (`_identidad`). Ver `_refrescar_indices`.
+_FICHERO_POR_PAIS: dict[str, tuple] = {}
 
 # Motivos de `sin_consultar` (contrato de la spec 002). `formato_anterior` y
 # `generacion_distinta` ya no existen: un índice en el formato anterior no se
@@ -337,6 +340,70 @@ def _load_indices():
             )
 
 
+def _identidad(ruta: Path) -> tuple:
+    """Lo que distingue un fichero de índice de otro puesto en su lugar.
+
+    El indexador escribe una base de datos nueva y la pone en su sitio con
+    `os.replace`, así que el inodo cambia; el tamaño y la fecha cubren a quien
+    sobrescriba el fichero en el mismo inodo. Lanza OSError si no se puede leer.
+    """
+    st = ruta.stat()
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def _retirar_indice(pais_code: str) -> None:
+    """Deja de servir un país: cierra su conexión y lo quita de todas las tablas."""
+    con = _CONEXIONES.pop(pais_code, None)
+    if con is not None:
+        con.close()
+    for tabla in (_META_POR_PAIS, _INDEX_FILE_POR_PAIS, _RAIZ_POR_PAIS,
+                  _TEXTO_NO_DISPONIBLE, _FICHERO_POR_PAIS, _IDS_MOSTRADOS):
+        tabla.pop(pais_code, None)
+
+
+def _refrescar_indices() -> None:
+    """Vuelve a registrar los índices cuyo fichero cambió desde que se abrieron.
+
+    El indexador sustituye el fichero del índice, y el servidor se quedaba con
+    la conexión al anterior hasta reiniciarse mientras leía del disco las
+    leyes nuevas: las búsquedas respondían con el índice viejo y las leyes que
+    añadía la pasada no existían para él (#78). Cada herramienta llama aquí
+    antes de responder, y la respuesta es la que daría un reinicio: el índice
+    nuevo si se puede servir, y ninguno para ese país si no, con el aviso de
+    siempre. Cuesta un `stat` por país: 7,4 µs por llamada con los seis índices
+    reales, medido el 2026-11-15. Las herramientas se ejecutan una tras
+    otra (fastmcp 2.x no las lleva a hilos), así que ninguna consulta en curso
+    pierde su conexión.
+
+    Un índice nuevo que aparece en el directorio no se recoge aquí: servirlo
+    sigue requiriendo reiniciar, como añadir un país.
+    """
+    cambiados = []
+    for pais_code, con in _CONEXIONES.items():
+        fichero = _FICHERO_POR_PAIS.get(pais_code)
+        if not fichero or fichero[0] is not con:
+            continue
+        _, ruta, identidad = fichero
+        try:
+            actual = _identidad(ruta)
+        except OSError:
+            actual = None
+        if actual != identidad:
+            cambiados.append((ruta, pais_code))
+    if not cambiados:
+        return
+    for ruta, pais_code in cambiados:
+        _retirar_indice(pais_code)
+    autorizada = REPOS_DIR.resolve()
+    for ruta, _ in sorted(cambiados):
+        if not ruta.exists():
+            print(f"[AVISO] {ruta.name!r} ya no existe; deja de servirse.", file=sys.stderr)
+            continue
+        print(f"[AVISO] {ruta.name!r} ha cambiado desde que se abrió; se vuelve a abrir.",
+              file=sys.stderr)
+        _registrar_indice(ruta, autorizada)
+
+
 def _registrar_indice(index_path: Path, autorizada: Path) -> None:
     """Abre un índice como entrada no confiable y, si lo supera, lo sirve.
 
@@ -345,6 +412,13 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
     corpus queda fuera del directorio autorizado: la raíz se decide aquí, una
     vez, y desde ese momento `_resolve_ruta` no vuelve a leer `_meta`.
     """
+    # La identidad se toma antes de abrir: si el fichero se sustituye entre
+    # las dos cosas, la siguiente llamada ve el cambio y lo vuelve a abrir. Al
+    # revés, una sustitución en ese hueco pasaría desapercibida.
+    try:
+        identidad = _identidad(index_path)
+    except OSError:
+        identidad = None
     try:
         con = legalize_indice.abrir(index_path)
     except ValueError as exc:
@@ -391,8 +465,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
                   f"{_INDEX_FILE_POR_PAIS.get(pais_code, '')!r}; índice ignorado.", file=sys.stderr)
             con.close()
             return
-        _CONEXIONES[pais_code].close()
-        _TEXTO_NO_DISPONIBLE.pop(pais_code, None)
+        _retirar_indice(pais_code)
 
     # Una fila con un valor que no es texto donde va texto se sirve con ese
     # campo vacío (`legalize_indice.fila_a_doc`). Queda dicho aquí, una vez por
@@ -409,6 +482,7 @@ def _registrar_indice(index_path: Path, autorizada: Path) -> None:
     _META_POR_PAIS[pais_code] = meta
     _INDEX_FILE_POR_PAIS[pais_code] = nombre_indice
     _RAIZ_POR_PAIS[pais_code] = raiz
+    _FICHERO_POR_PAIS[pais_code] = (con, index_path, identidad)
     if meta.get("tokenizador") != legalize_tokenizer.huella():
         # El texto se plegó con otras reglas: buscar con las actuales daría
         # resultados que no corresponden. El resto del corpus sí se sirve.
@@ -1066,6 +1140,7 @@ de la propia norma. No infieras el idioma del contenido a partir de la clave.
 
 @mcp.tool()
 def listar_paises() -> list[PaisInfo] | ErrorRespuesta:
+    _refrescar_indices()
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
@@ -1249,6 +1324,7 @@ def buscar_ley(
     Las fechas van por rango y no por igualdad porque solo `fecha_derogacion` ya
     tiene 1.152 valores distintos: nadie busca una fecha de derogación exacta.
     """
+    _refrescar_indices()
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
@@ -1315,6 +1391,7 @@ def contar_leyes(
     cambiaría el tipo de retorno de lista a objeto, y toda llamada existente que
     la trate como lista dejaría de funcionar en silencio.
     """
+    _refrescar_indices()
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
@@ -1341,6 +1418,7 @@ def contar_leyes(
 
 @mcp.tool()
 def obtener_ley(id_ley: str, pais: str = "", solo_metadata: bool = False, max_chars: int = MAX_CONTENT_CHARS) -> LeyCompleta | ErrorRespuesta:
+    _refrescar_indices()
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
 
     pais, error_pais = _pais_pedido(pais)
@@ -1438,6 +1516,7 @@ def obtener_articulo(id_ley: str, articulo: str, pais: str = "", contexto_chars:
     `ubicaciones` dice cuáles hay; con `capitulo`, la de esa ubicación. Antes
     solo la primera era alcanzable (spec 002, US5).
     """
+    _refrescar_indices()
     if not _CONEXIONES:
         return ErrorRespuesta(error="No hay índices disponibles.")
 
@@ -1558,6 +1637,7 @@ def _conteos(pais: str, nombre: str) -> dict:
 
 @mcp.tool()
 def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
+    _refrescar_indices()
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
     pais, error_pais = _pais_pedido(pais)
     if error_pais:
@@ -1567,6 +1647,7 @@ def listar_rangos(pais: str = "") -> list[RangoConteo] | ErrorRespuesta:
 
 @mcp.tool()
 def estadisticas(pais: str = "") -> Estadisticas | ErrorRespuesta:
+    _refrescar_indices()
     if not _CONEXIONES: return ErrorRespuesta(error="No hay índices disponibles.")
     pais, error_pais = _pais_pedido(pais)
     if error_pais:
