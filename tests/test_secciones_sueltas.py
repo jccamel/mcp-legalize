@@ -139,5 +139,5 @@ def test_rows_and_locating_on_the_fly_agree(cuerpo, contexto):
         primeras.setdefault(numero.casefold(), (numero, inicio, fin_enc, fin, abierto))
     assert primeras
     for numero, inicio, fin_enc, fin, abierto in primeras.values():
-        corte = min(fin_enc + contexto, len(cuerpo)) if abierto else fin
+        corte = min(fin_enc + contexto, fin)
         assert la.localizar(cuerpo, numero, contexto) == (inicio, corte, fin), numero

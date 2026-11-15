@@ -94,8 +94,9 @@ buscar por texto aparecen en `sin_consultar`, con el motivo. `buscar_ley`
 devuelve un error, nunca `[]`, cuando no se pudo buscar en ninguno de los países
 pedidos.
 
-**Artículos.** Cuando nada marca el final de un artículo, se corta en
-`contexto_chars` y la respuesta lo dice con `texto_truncado`, `chars_totales` y
+**Artículos.** Un artículo se corta en `contexto_chars` caracteres después de su
+encabezado, tanto si lo cierra el siguiente como si llega al final del
+documento, y la respuesta lo dice con `texto_truncado`, `chars_totales` y
 `chars_devueltos`, igual que `obtener_ley` con `max_chars`. Cuando un número se
 repite —los códigos suecos vuelven a empezar en `1 §` en cada capítulo— se
 devuelve la primera aparición y se listan todas en `ubicaciones`; para obtener

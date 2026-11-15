@@ -92,9 +92,10 @@ thousand are arbitrary. `contar_leyes` tells *"these are the 24 laws"* from
 `sin_consultar` with the reason. `buscar_ley` returns an error, never `[]`, when
 none of the requested countries could be searched.
 
-**Articles.** When nothing marks the end of an article, it is cut at
-`contexto_chars` and the response says so with `texto_truncado`,
-`chars_totales` and `chars_devueltos`, as `obtener_ley` does with `max_chars`.
+**Articles.** An article is cut `contexto_chars` characters after its heading,
+whether the next heading closes it or it runs to the end of the document, and
+the response says so with `texto_truncado`, `chars_totales` and
+`chars_devueltos`, as `obtener_ley` does with `max_chars`.
 When a number repeats — Swedish codes restart `1 §` in every chapter — the
 first occurrence is returned and all of them are listed in `ubicaciones`; pass
 one back as `capitulo` to get that one.

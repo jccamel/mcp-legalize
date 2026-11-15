@@ -97,7 +97,7 @@ def test_the_first_row_of_each_number_is_what_locating_on_the_fly_returns(cuerpo
     for _, numero, _, inicio, fin_enc, fin, abierto in legalize_articulos.localizar_todos(cuerpo):
         primeras.setdefault(numero.casefold(), (numero, inicio, fin_enc, fin, abierto))
     for numero, inicio, fin_enc, fin, abierto in primeras.values():
-        corte = min(fin_enc + contexto, len(cuerpo)) if abierto else fin
+        corte = min(fin_enc + contexto, fin)
 
         assert legalize_articulos.localizar(cuerpo, numero, contexto) == (inicio, corte, fin), numero
 
